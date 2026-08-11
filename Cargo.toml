@@ -1,0 +1,23 @@
+[package]
+name = "alter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "A fast Wayland launcher, global search and clipboard history for Hyprland"
+license = "MIT"
+repository = "https://github.com/yuukidach/alter"
+readme = "README.md"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11.4", features = ["v4_18"] }
+gtk4-layer-shell = { version = "0.8.0", features = ["v1_3"] }
+ksni = { version = "0.3.6", features = ["blocking"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.5"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true

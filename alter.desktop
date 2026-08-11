@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Alter
+Comment=Wayland launcher, global search and clipboard history
+Exec=alter --toggle
+Icon=system-search-symbolic
+Terminal=false
+Categories=Utility;
