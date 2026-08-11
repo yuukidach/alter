@@ -22,6 +22,18 @@
 
 ## 构建
 
+### Arch Linux（AUR）
+
+AUR 包名为 `alter-launcher`（`alter` 已被其他项目占用）：
+
+```bash
+yay -S alter-launcher
+```
+
+安装后可直接运行 `alter --daemon`，并按下文配置 Hyprland 快捷键。
+
+### 从源码构建
+
 系统依赖（Arch/EndeavourOS）：
 
 ```bash
@@ -35,6 +47,9 @@ cargo run --release
 ```
 
 二进制文件位于 `target/release/alter`。
+
+维护者推送与 `Cargo.toml` 版本一致的 `v*` tag 后，GitHub Actions 会在 Arch
+容器中验证 AUR 包、生成 `.SRCINFO` 并发布到 `alter-launcher`。
 
 ## Hyprland 快捷键
 

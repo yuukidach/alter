@@ -1,0 +1,182 @@
+name: Publish to AUR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-aur
+  cancel-in-progress: false
+
+env:
+  AUR_PACKAGE: alter-launcher
+
+jobs:
+  aur:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install release tooling
+        run: |
+          set -euo pipefail
+          pacman -Sy --noconfirm curl git jq openssh
+
+      - uses: actions/checkout@v4
+
+      - name: Resolve and validate release version
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            tag_name="$GITHUB_REF_NAME"
+          else
+            tag_name=$(curl --fail --silent --show-error --retry 3 \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/tags" \
+              | jq -r '.[0].name // empty')
+          fi
+          [[ "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "::error::Could not resolve a valid v* release tag"
+            exit 1
+          }
+
+          version="${tag_name#v}"
+          cargo_version=$(sed -n \
+            '/^\[package\]/,/^\[/{s/^version = "\([^"]*\)"/\1/p}' \
+            Cargo.toml | head -1)
+          [[ "$cargo_version" == "$version" ]] || {
+            echo "::error::Tag $tag_name does not match Cargo.toml version $cargo_version"
+            exit 1
+          }
+
+          echo "TAG_NAME=$tag_name" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Compute release archive checksum
+        run: |
+          set -euo pipefail
+          archive_url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG_NAME}.tar.gz"
+          sha256=$(curl --fail --silent --show-error --retry 5 --retry-all-errors -L \
+            "$archive_url" | sha256sum | cut -d' ' -f1)
+          [[ "$sha256" =~ ^[[:xdigit:]]{64}$ ]] || {
+            echo "::error::Invalid release checksum"
+            exit 1
+          }
+          echo "SHA256=$sha256" >> "$GITHUB_ENV"
+
+      - name: Set up AUR SSH key
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${AUR_SSH_KEY:-}" ]] || {
+            echo "::error::AUR_SSH_KEY is not configured"
+            exit 1
+          }
+
+          install -d -m700 /root/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > /root/.ssh/id_aur
+          chmod 600 /root/.ssh/id_aur
+          printf '%s\n' \
+            'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' \
+            > /root/.ssh/known_hosts
+          cat > /root/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile /root/.ssh/id_aur
+            IdentitiesOnly yes
+            BatchMode yes
+            ConnectTimeout 20
+            ServerAliveInterval 15
+            ServerAliveCountMax 2
+          EOF
+          chmod 600 /root/.ssh/config
+          ssh-keygen -y -f /root/.ssh/id_aur >/dev/null || {
+            echo "::error::AUR_SSH_KEY is not a readable private SSH key"
+            exit 1
+          }
+
+      - name: Prepare AUR package repository
+        run: |
+          set -euo pipefail
+          clone_succeeded=false
+          max_attempts=8
+          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+            rm -rf aur
+            echo "::group::AUR clone attempt $attempt/$max_attempts"
+            if timeout 90s git clone \
+              "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" aur; then
+              clone_succeeded=true
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            if (( attempt < max_attempts )); then
+              delay=$((20 * 2 ** (attempt - 1)))
+              (( delay > 300 )) && delay=300
+              echo "AUR clone failed; retrying in ${delay}s..."
+              sleep "$delay"
+            fi
+          done
+          [[ "$clone_succeeded" == true ]] || {
+            echo "::error::Could not clone the AUR repository"
+            exit 1
+          }
+
+          cp packaging/aur/PKGBUILD aur/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/PKGBUILD
+          sed -i 's/^pkgrel=.*/pkgrel=1/' aur/PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('$SHA256')/" aur/PKGBUILD
+
+      - name: Build and validate AUR package
+        run: |
+          set -euo pipefail
+          pacman -S --needed --noconfirm \
+            cargo curl gtk4 gtk4-layer-shell pkgconf wl-clipboard xdg-utils
+
+          useradd -m builder
+          chown -R builder:builder aur
+          cd aur
+          su builder -c 'makepkg --printsrcinfo > .SRCINFO'
+          su builder -c 'makepkg --cleanbuild --noconfirm --nodeps'
+          chown -R root:root .
+
+      - name: Publish AUR package
+        run: |
+          set -euo pipefail
+          cd aur
+          git config user.name "Da Chen"
+          git config user.email "dachen@connect.hku.hk"
+
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR package is already at v$VERSION"
+            exit 0
+          fi
+
+          git commit -m "bump: v$VERSION"
+          push_succeeded=false
+          max_attempts=8
+          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+            if timeout 90s git push origin HEAD:master; then
+              push_succeeded=true
+              break
+            fi
+            if (( attempt < max_attempts )); then
+              delay=$((20 * 2 ** (attempt - 1)))
+              (( delay > 300 )) && delay=300
+              echo "AUR push failed; retrying in ${delay}s..."
+              sleep "$delay"
+            fi
+          done
+          [[ "$push_succeeded" == true ]] || {
+            echo "::error::Could not push the AUR update"
+            exit 1
+          }
