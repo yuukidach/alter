@@ -16,6 +16,7 @@
 - 应用结果显示 `.desktop` 图标；没有图标时使用系统 fallback 图标
 - 通过 StatusNotifierItem 在 Waybar 托盘常驻，菜单可打开、进入设置或退出
 - 剪贴板默认保留 30 天，可在设置中调整为 1–3650 天
+- 界面支持简体中文和 English；默认跟随系统语言，也可在设置中手动选择
 - 支持 Google、Bing、DuckDuckGo Web 搜索及可选搜索建议
 - 支持文件动作面板、关键词 Workflow、自定义 Snippets 和使用频率学习排序
 - 全部操作支持键盘：Enter、↑、↓、Tab / →、Esc
@@ -47,6 +48,17 @@ cargo run --release
 ```
 
 二进制文件位于 `target/release/alter`。
+
+### 界面语言
+
+首次启动默认使用系统语言（中文或英文）。在设置页的“界面语言”中可以选择：
+
+- 跟随系统
+- 简体中文
+- English
+
+语言选项保存在 `~/.config/alter/settings.conf` 的 `language=` 字段，修改后重启
+Alter 生效。
 
 维护者推送与 `Cargo.toml` 版本一致的 `v*` tag 后，GitHub Actions 会在 Arch
 容器中验证 AUR 包、生成 `.SRCINFO` 并发布到 `alter-launcher`。

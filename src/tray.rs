@@ -1,3 +1,4 @@
+use crate::i18n::Language;
 use gtk::gdk_pixbuf::Pixbuf;
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
@@ -15,6 +16,7 @@ pub enum TrayAction {
 struct AlterTray {
     sender: Sender<TrayAction>,
     icon: Vec<Icon>,
+    language: Language,
 }
 
 impl Tray for AlterTray {
@@ -37,7 +39,13 @@ impl Tray for AlterTray {
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
             title: "Alter".to_owned(),
-            description: "全局搜索、剪贴板和计算器".to_owned(),
+            description: self
+                .language
+                .text(
+                    "全局搜索、剪贴板和计算器",
+                    "Global search, clipboard and calculator",
+                )
+                .to_owned(),
             icon_pixmap: self.icon.clone(),
             ..Default::default()
         }
@@ -57,7 +65,7 @@ impl Tray for AlterTray {
         let quit_sender = self.sender.clone();
         vec![
             StandardItem {
-                label: "打开 Alter".to_owned(),
+                label: self.language.text("打开 Alter", "Open Alter").to_owned(),
                 icon_name: "system-search".to_owned(),
                 activate: Box::new(move |_| {
                     let _ = open_sender.send(TrayAction::Toggle);
@@ -66,7 +74,7 @@ impl Tray for AlterTray {
             }
             .into(),
             StandardItem {
-                label: "打开设置".to_owned(),
+                label: self.language.text("打开设置", "Open Settings").to_owned(),
                 icon_name: "preferences-system".to_owned(),
                 activate: Box::new(move |_| {
                     let _ = settings_sender.send(TrayAction::Settings);
@@ -76,7 +84,7 @@ impl Tray for AlterTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "退出 Alter".to_owned(),
+                label: self.language.text("退出 Alter", "Quit Alter").to_owned(),
                 icon_name: "application-exit".to_owned(),
                 activate: Box::new(move |_| {
                     let _ = quit_sender.send(TrayAction::Quit);
@@ -92,12 +100,20 @@ pub struct TrayHandle {
     handle: ksni::blocking::Handle<AlterTray>,
 }
 
-pub fn start(sender: Sender<TrayAction>, icon_path: Option<&Path>) -> Result<TrayHandle, String> {
+pub fn start(
+    sender: Sender<TrayAction>,
+    icon_path: Option<&Path>,
+    language: Language,
+) -> Result<TrayHandle, String> {
     let icon = icon_path.map(load_icon).unwrap_or_default();
-    AlterTray { sender, icon }
-        .spawn()
-        .map(|handle| TrayHandle { handle })
-        .map_err(|error| format!("cannot start status notifier: {error:?}"))
+    AlterTray {
+        sender,
+        icon,
+        language,
+    }
+    .spawn()
+    .map(|handle| TrayHandle { handle })
+    .map_err(|error| format!("cannot start status notifier: {error:?}"))
 }
 
 impl Drop for TrayHandle {

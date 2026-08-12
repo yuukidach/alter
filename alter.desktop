@@ -2,6 +2,10 @@
 Type=Application
 Name=Alter
 Comment=Wayland launcher, global search and clipboard history
+Name[zh_CN]=Alter
+Comment[zh_CN]=Wayland 启动器、全局搜索和剪贴板历史
+Name[en]=Alter
+Comment[en]=Wayland launcher, global search and clipboard history
 Exec=alter --toggle
 Icon=alter
 Terminal=false

@@ -1,3 +1,4 @@
+use crate::i18n::LanguagePreference;
 use crate::paths;
 use std::fs;
 use std::io;
@@ -22,6 +23,7 @@ pub struct Settings {
     pub max_results: usize,
     pub clipboard_retention_days: u32,
     pub theme: Theme,
+    pub language: LanguagePreference,
 }
 
 pub type SharedSettings = Arc<RwLock<Settings>>;
@@ -40,6 +42,7 @@ impl Default for Settings {
             max_results: 40,
             clipboard_retention_days: 30,
             theme: Theme::Dark,
+            language: LanguagePreference::System,
         }
     }
 }
@@ -78,7 +81,7 @@ pub fn save(settings: &Settings) -> io::Result<()> {
     let mut value = settings.clone();
     value.clamp();
     let content = format!(
-        "# Alter preferences\nfile_search={}\nclipboard_search={}\nweb_search={}\nweb_suggestions={}\nworkflow_search={}\nsnippet_search={}\nlearning_ranking={}\nshow_recent={}\nmax_results={}\nclipboard_retention_days={}\ntheme={}\n",
+        "# Alter preferences\nfile_search={}\nclipboard_search={}\nweb_search={}\nweb_suggestions={}\nworkflow_search={}\nsnippet_search={}\nlearning_ranking={}\nshow_recent={}\nmax_results={}\nclipboard_retention_days={}\ntheme={}\nlanguage={}\n",
         value.file_search,
         value.clipboard_search,
         value.web_search,
@@ -89,7 +92,8 @@ pub fn save(settings: &Settings) -> io::Result<()> {
         value.show_recent,
         value.max_results,
         value.clipboard_retention_days,
-        value.theme.as_str()
+        value.theme.as_str(),
+        value.language.as_str()
     );
     let temporary = path.with_extension("conf.tmp");
     fs::write(&temporary, content)?;
@@ -142,6 +146,7 @@ fn parse(content: &str) -> Settings {
                     _ => Theme::Dark,
                 }
             }
+            "language" => settings.language = LanguagePreference::parse(value),
             _ => {}
         }
     }
@@ -173,7 +178,7 @@ mod tests {
     #[test]
     fn parses_and_clamps_preferences() {
         let settings = parse(
-            "file_search=false\nclipboard_search=true\nweb_search=false\nweb_suggestions=0\nworkflow_search=no\nsnippet_search=false\nlearning_ranking=1\nshow_recent=no\nmax_results=1000\nclipboard_retention_days=9999\ntheme=light\n",
+            "file_search=false\nclipboard_search=true\nweb_search=false\nweb_suggestions=0\nworkflow_search=no\nsnippet_search=false\nlearning_ranking=1\nshow_recent=no\nmax_results=1000\nclipboard_retention_days=9999\ntheme=light\nlanguage=en\n",
         );
         assert!(!settings.file_search);
         assert!(settings.clipboard_search);
@@ -186,6 +191,7 @@ mod tests {
         assert_eq!(settings.max_results, 100);
         assert_eq!(settings.clipboard_retention_days, 3650);
         assert_eq!(settings.theme, Theme::Light);
+        assert_eq!(settings.language, LanguagePreference::English);
     }
 
     #[test]
@@ -203,6 +209,7 @@ mod tests {
         assert!(settings.workflow_search);
         assert!(settings.snippet_search);
         assert!(settings.learning_ranking);
+        assert_eq!(settings.language, LanguagePreference::System);
     }
 
     #[test]

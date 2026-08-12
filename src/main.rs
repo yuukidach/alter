@@ -3,6 +3,7 @@ mod calculator;
 mod clipboard;
 pub mod clipboard_meta;
 mod desktop;
+mod i18n;
 mod paths;
 mod search;
 mod settings;
@@ -95,7 +96,7 @@ fn main() -> glib::ExitCode {
         .iter()
         .any(|argument| argument == "--version" || argument == "-V")
     {
-        println!("alter 0.1.0");
+        println!("alter 0.1.1");
         return glib::ExitCode::SUCCESS;
     }
     if arguments
@@ -120,6 +121,7 @@ fn main() -> glib::ExitCode {
 
     let apps = desktop::load_applications();
     let preferences = settings::shared(settings::load());
+    let language = settings::snapshot(&preferences).language.effective();
     let engine = SearchEngine::new(apps, database.clone(), preferences.clone());
     let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("alter"));
     let state: Rc<RefCell<Option<ui::UiState>>> = Rc::new(RefCell::new(None));
@@ -178,7 +180,7 @@ fn main() -> glib::ExitCode {
             // command-line clients such as `alter --toggle` still exit after
             // forwarding their activation request.
             *application_hold.borrow_mut() = Some(application.hold());
-            match tray::start(tray_sender.clone(), paths::icon_path().as_deref()) {
+            match tray::start(tray_sender.clone(), paths::icon_path().as_deref(), language) {
                 Ok(handle) => *tray_handle.borrow_mut() = Some(handle),
                 Err(error) => eprintln!("alter: tray icon is unavailable: {error}"),
             }

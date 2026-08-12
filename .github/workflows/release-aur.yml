@@ -139,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           pacman -S --needed --noconfirm \
-            cargo curl gtk4 gtk4-layer-shell pkgconf wl-clipboard xdg-utils
+            rust curl gtk4 gtk4-layer-shell pkgconf wl-clipboard xdg-utils
 
           useradd -m builder
           chown -R builder:builder aur

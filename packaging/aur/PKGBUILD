@@ -2,8 +2,9 @@
 
 pkgname=alter-launcher
 _srcname=alter
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
+options=(!lto)
 pkgdesc="Fast Wayland launcher, global search and clipboard history for Hyprland"
 arch=('x86_64' 'aarch64')
 url="https://github.com/yuukidach/alter"
@@ -36,12 +37,15 @@ prepare() {
 
 build() {
     cd "$_srcname-$pkgver"
-    cargo build --frozen --release
+    # Arch's makepkg enables linker LTO globally.  libsqlite3-sys supplies a
+    # static C archive, which LLVM's LTO linker can occasionally drop before
+    # resolving rusqlite's symbols; disable only Cargo's LTO for this package.
+    CARGO_PROFILE_RELEASE_LTO=false cargo build --frozen --release
 }
 
 check() {
     cd "$_srcname-$pkgver"
-    cargo test --frozen --release
+    CARGO_PROFILE_RELEASE_LTO=false cargo test --frozen --release
 }
 
 package() {
