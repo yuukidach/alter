@@ -1,326 +1,117 @@
 # Alter
 
-一个面向 **Hyprland + Wayland** 的快速启动器、全局搜索和剪贴板历史工具。
+Alter is a fast, keyboard-first launcher for **Hyprland + Wayland**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 overlay.
 
-当前版本是可以日常使用的 Wayland 启动器：
+**English is the primary README.** [![简体中文](https://img.shields.io/badge/简体中文-README.zh--CN-blue)](README.zh-CN.md)
 
-- `Super + Space` 唤起/隐藏搜索浮层
-- `Super + Shift + C` 直接打开剪贴板专用搜索
-- 搜索并启动 `.desktop` 应用
-- 使用 `plocate` 搜索文件（没有可用数据库时回退到 `fd`）
-- 读取现有 Clipse 的文本、图片和文件历史；没有 Clipse 时监听文本剪贴板并保存最近 500 条记录
-- 进入 `c` / `clip` 剪贴板范围后，选择记录即可在右侧预览完整内容，图片结果显示大图；普通搜索不占用预览区域
-- `a `、`f `、`c ` 前缀分别限定应用、文件和剪贴板
-- 输入算式时提供安全的内置计算器，按 Enter 复制结果
-- 搜索 `settings` / `设置` 或按齿轮进入 Alter 设置
-- 应用结果显示 `.desktop` 图标；没有图标时使用系统 fallback 图标
-- 通过 StatusNotifierItem 在 Waybar 托盘常驻，菜单可打开、进入设置或退出
-- 剪贴板默认保留 30 天，可在设置中调整为 1–3650 天
-- 界面支持简体中文和 English；默认跟随系统语言，也可在设置中手动选择
-- 支持 Alfred 风格 Quick Links：在设置中配置关键词和 URL 模板，输入关键词与参数后快速跳转
-- 支持 Google、Bing、DuckDuckGo Web 搜索及可选搜索建议
-- 支持文件动作面板、关键词 Workflow、自定义 Snippets 和使用频率学习排序
-- 全部操作支持键盘：Enter、↑、↓、Tab / →、Esc
+![Alter search interface](screenshots/alter-search.png)
 
-## 构建
+## Features
 
-### Arch Linux（AUR）
+- Launch `.desktop` applications with fuzzy search.
+- Search local files with `plocate` or `fd` as a fallback.
+- Browse clipboard history with optional [Clipse](https://github.com/savedra1/clipse) integration, including text, image, and file previews.
+- Use the built-in calculator, web search, Quick Links, Workflows, and Snippets.
+- Keep Alter in the Waybar tray with light/dark themes and English/Chinese UI.
 
-AUR 包名为 `alter-launcher`（`alter` 已被其他项目占用）：
+## Requirements
+
+Alter targets Linux systems running Hyprland and Wayland.
+
+On Arch Linux or EndeavourOS:
+
+```bash
+sudo pacman -S --needed base-devel rust gtk4 gtk4-layer-shell \
+  plocate fd wl-clipboard curl xdg-utils
+```
+
+`plocate`, `fd`, and Clipse are optional. Clipse is needed for image and file clipboard history; without it, Alter's built-in watcher stores text entries only.
+
+## Install
+
+### AUR
 
 ```bash
 yay -S alter-launcher
 ```
 
-安装后可直接运行 `alter --daemon`，并按下文配置 Hyprland 快捷键。
-
-### 从源码构建
-
-系统依赖（Arch/EndeavourOS）：
+### From source
 
 ```bash
-sudo pacman -S --needed base-devel rust gtk4 gtk4-layer-shell plocate fd wl-clipboard curl xdg-utils
+cargo build --release
+./target/release/alter --daemon
 ```
 
-在项目目录构建并运行：
+## Hyprland setup
 
-```bash
-cargo run --release
-```
-
-二进制文件位于 `target/release/alter`。
-
-### 界面语言
-
-首次启动默认使用系统语言（中文或英文）。在设置页的“界面语言”中可以选择：
-
-- 跟随系统
-- 简体中文
-- English
-
-语言选项保存在 `~/.config/alter/settings.conf` 的 `language=` 字段，修改后重启
-Alter 生效。
-
-维护者推送与 `Cargo.toml` 版本一致的 `v*` tag 后，GitHub Actions 会在 Arch
-容器中验证 AUR 包、生成 `.SRCINFO` 并发布到 `alter-launcher`。
-
-## Hyprland 快捷键
-
-当前配置已经把 `Super+Space` 绑定给 Alter，并用 `Super+Shift+C` 直接进入剪贴板范围；在其他机器上可添加下面两行：
+Start one background instance, then bind the shortcuts you want:
 
 ```ini
-bind = SUPER, SPACE, exec, /path/to/alter/target/release/alter --toggle
-bind = SUPER SHIFT, C, exec, /path/to/alter/target/release/alter --clipboard
+exec-once = /path/to/alter --daemon
+bind = SUPER, SPACE, exec, /path/to/alter --toggle
+bind = SUPER SHIFT, C, exec, /path/to/alter --clipboard
 ```
 
-然后重新加载配置：
+Reload Hyprland with `hyprctl reload`. The daemon stays hidden until a shortcut is pressed and reuses the same window for later invocations.
 
-```bash
-hyprctl reload
-```
+## Usage
 
-`Super+Space` 会在同一个进程中切换浮层；`Super+Shift+C` 会复用同一窗口并自动填入
-`c ` 搜索范围，不会不断创建新窗口。
+| Input | Action |
+| --- | --- |
+| `a query` | Search applications |
+| `f query` | Search files |
+| `c query` | Search clipboard history |
+| `? query` / `web query` | DuckDuckGo search |
+| `g query` / `b query` / `ddg query` | Google / Bing / DuckDuckGo |
+| `settings` or `Ctrl+,` | Open settings |
 
-当前 Hyprland 配置已经加入下面这一行；如果你在其他机器部署，可以按需添加：
+Useful keys:
 
-```ini
-exec-once = /path/to/alter/target/release/alter --daemon
-```
+- `Enter` — launch, open, or copy the selected result
+- `↑` / `↓` — change selection
+- `Tab` / `→` — open actions for an app, file, or Workflow result
+- `←` / `Backspace` — return from the actions page
+- `Ctrl+Shift+P` — pin or unpin a clipboard item
+- `Delete` — hide a clipboard item in Alter
+- `Esc` — hide the overlay
 
-`--daemon` 会在后台等待快捷键，不会显示窗口。
-
-## 与 Alfred 的功能差距
-
-Alter 目前聚焦于 **Hyprland + Wayland 的本地启动与搜索**。下表按当前代码实际支持情况比较，避免把 Linux 上暂时不可用的 macOS 专属能力算成已实现：
-
-| 能力 | Alter | Alfred | 说明 |
-| --- | --- | --- | --- |
-| 全局启动器、模糊搜索 | 已有 | 已有 | Alter 依赖 Hyprland 的 `Super+Space` 绑定 |
-| 快捷键与搜索作用域配置 | 部分 | 已有 | Alter 的快捷键在 Hyprland 配置中修改；`Super+Shift+C` 可直达剪贴板，设置页可控制本地、Web、Workflow、Snippet 和学习排序，`a/f/c` 可快速限域 |
-| 应用启动、文件搜索 | 已有 | 已有 | Alter 使用 `.desktop`、`plocate` / `fd` |
-| 搜索范围扩展 | 部分 | 已有 | Alter 已支持 Web、Workflow 和 Snippets；浏览器书签、联系人等原生数据源仍缺失 |
-| 剪贴板历史 | 文本/图片/文件 | 文本/图片/文件及更丰富操作 | Alter 可读取 Clipse，支持右侧完整预览、图片预览、固定和隐藏；自带监听器目前只采集文本 |
-| 计算器 | 已有 | 已有 | Alter 支持基础四则、括号和常用运算 |
-| 设置与主题 | 已有基础设置 | 完整偏好、主题和同步 | Alter 支持深浅主题与各搜索模块开关，目前只保存本地配置 |
-| 托盘常驻 | 已有 | 菜单栏常驻 | Alter 使用 StatusNotifierItem，适配 Waybar |
-| Web 搜索、建议 | 已有 | 已有 | 使用 `? query`、`web query` 或 `g/b/ddg query` |
-| Quick Links / 快速链接 | 已有 | 已有 | 设置中管理关键词和 URL 模板，只在显式关键词调用时显示 |
-| 文件操作/Universal Actions | 基础已有 | 已有 | Alter 支持打开、定位、复制路径/URI 和经确认移入回收站，尚无多步动作链 |
-| Snippets / 文本展开 | 基础已有 | 已有 | Alter 支持关键词与 `{query}` 替换并复制内容；Wayland 下不注入按键自动粘贴 |
-| Workflow / 插件系统 | 基础已有 | 已有 | Alter 支持 JSON manifest、关键词触发、argv 命令、cwd/env/icon、Script Filter 和多个命名动作，尚无可视化编辑和复杂编排 |
-| 学习排序、搜索历史 | 已有 | 已有 | Alter 按明确选择的频率和时间提升常用结果，可在设置中关闭 |
-| Shell 命令、URL、书签、联系人等扩展 | 部分 | 已有（部分为 macOS 集成） | URL 可用可视化 Quick Links，argv 命令可通过 Workflow 扩展；书签/联系人等尚无原生索引 |
-| 配置导入/导出、跨设备同步 | 暂无 | 已有 | Alter 目前是单机配置 |
-
-仍值得继续补齐的三项是：
-
-1. Workflow 的图形化编辑和复杂动作链（Script Filter 与多个命名动作已有基础版本）；
-2. 浏览器书签、历史与密码管理器等可选数据源；
-3. Snippets 的输入法级安全文本展开、配置导出和同步。
-
-### Web 搜索
-
-在搜索框中使用下面任一种显式前缀即可生成浏览器动作，按 Enter 后由
-`xdg-open` 打开默认浏览器：
+Command-line modes:
 
 ```text
-? wayland layer shell       # 使用默认 DuckDuckGo
-web gtk4 css                 # 使用默认 DuckDuckGo
-g rust gtk                  # Google
-b linux launcher             # Bing
-ddg clipboard manager        # DuckDuckGo
+alter --daemon       Start hidden and keep the tray resident
+alter --toggle       Toggle the existing instance
+alter --clipboard    Open directly in clipboard search
+alter --capture      Read one text item from stdin into clipboard history
 ```
 
-查询会按 RFC 3986 规则进行 UTF-8 百分号编码，输入不会经过 shell。Google、
-Bing 和 DuckDuckGo 都带有轻量建议接口；网络或 `curl` 不可用时，建议列表会
-静默为空，不影响本地搜索。
+## Configuration
 
-可在 `~/.config/alter/web-searches.json` 添加或覆盖搜索模板。文件内容是 JSON
-数组，每项至少包含 `id`、`name`、`keywords` 和 `url_template`，URL 中必须有
-`{query}`：
+Most options are available from **Settings** and are saved automatically. The main files are:
 
-```json
-[
-  {
-    "id": "baidu",
-    "name": "百度",
-    "keywords": ["bd", "baidu"],
-    "url_template": "https://www.baidu.com/s?wd={query}",
-    "suggestion_template": "https://suggestion.baidu.com/su?wd={query}"
-  }
-]
-```
+| Path | Purpose |
+| --- | --- |
+| `~/.config/alter/settings.conf` | Feature switches, theme, language, retention period |
+| `~/.config/alter/quick-links.json` | Keyword + URL shortcuts |
+| `~/.config/alter/web-searches.json` | Custom web-search templates |
+| `~/.config/alter/workflows/*.json` | User-defined commands and actions |
+| `~/.config/alter/snippets.json` | Text templates using `{query}` |
+| `~/.local/share/alter/history.sqlite3` | Clipboard metadata and usage ranking |
 
-也支持更易手写的 `~/.config/alter/web-searches.conf`，每行格式为：
-`id|名称|关键词,别名|搜索 URL|建议 URL`（建议 URL 可省略）。
+All extension commands are started as argument arrays, not through a shell. Keep custom commands and URL templates under your control.
 
-Web 搜索和联网建议可分别在 Alter 设置中关闭。关闭建议后不会发起建议请求，
-自定义 URL 仍由 `xdg-open` 交给系统默认浏览器。
+The interface follows the system locale by default. Choose **English** or **Simplified Chinese** in Settings to override it.
 
-### Quick Links / 快速链接
+## Clipboard notes
 
-Quick Links 用于“关键词 + 参数 → URL”的精确跳转。可在 Alter 设置的“快速链接”
-区域新增、编辑或删除，不需要编写 Workflow。例如配置：
+Alter keeps clipboard entries for 30 days by default, configurable from 1 to 3650 days. Clipse entries are read from Clipse's history file; Alter does not rewrite that file. Clipboard data is stored locally and may contain sensitive text.
 
-```text
-名称：工单详情
-关键词：job
-URL 模板：https://example.com/jobs/detail?job_id={query}
-```
+## Limitations
 
-之后输入 `job j-056rekk80h`，Alter 会显示一条“链接”结果；按 Enter 后打开：
+- Hyprland/Wayland is the supported desktop environment; X11, GNOME, and KDE integrations are not currently provided.
+- The built-in clipboard watcher records text only. Use Clipse for image and file history.
+- Wayland prevents applications from injecting an unconditional `Ctrl+V` into another client; Snippets and clipboard results copy to the clipboard instead.
+- File search quality depends on the freshness of the `plocate` index.
 
-```text
-https://example.com/jobs/detail?job_id=j-056rekk80h
-```
+## License
 
-每个模板必须使用 `http` 或 `https` 并包含 `{query}`。参数会作为 URL 组件进行
-UTF-8 百分号编码，不经过 shell。Quick Links 只响应完整的显式关键词，不会出现在
-应用、文件或剪贴板等普通搜索结果中。配置保存在
-`~/.config/alter/quick-links.json`，在设置中修改后立即生效。
-
-### 文件动作
-
-在应用或文件结果上按 `Tab` 或 `→` 进入动作页，使用 `↑` / `↓` 选择并按
-Enter 执行；按 `←`、Backspace 或 Esc 返回搜索。当前动作包括：
-
-- 打开应用、文件或目录；
-- 在文件管理器中打开所在目录；
-- 复制完整路径或安全转义后的 `file://` URI；
-- 将文件或目录移入系统回收站。
-
-“移入回收站”会显示包含目标路径的二次确认，并通过 `gio trash` 执行。应用的
-`.desktop` 条目不会提供删除动作，避免误删系统或 Flatpak 的启动项。
-
-### Workflow / 插件
-
-每个 Workflow 是 `~/.config/alter/workflows/` 下的一个 JSON 文件。下面的例子在
-输入 `gh rust gtk` 后生成一个结果，按 Enter 会打开 GitHub 搜索：
-
-```json
-{
-  "id": "github-search",
-  "name": "搜索 GitHub",
-  "description": "在默认浏览器中搜索仓库和代码",
-  "keyword": "gh",
-  "command": [
-    "xdg-open",
-    "https://github.com/search?q={query}"
-  ],
-  "icon": "web-browser",
-  "enabled": true
-}
-```
-
-`keyword` 也可写成 `keywords` 数组。`{query}` 可用于命令参数、`cwd` 和 `env`
-的值，但不能替换可执行文件本身。命令始终按 argv 数组直接启动，不使用
-`sh -c`；一个损坏的 manifest 也不会阻止其他 Workflow 加载。
-
-#### Script Filter
-
-需要根据输入动态列出候选项时，可以在 manifest 中加入 `"script_filter": true`。
-脚本只会在用户明确输入 Workflow 关键词时运行（不会因为普通模糊搜索而执行），
-并且有 800 ms 超时、256 KiB 输出上限和最多 50 个结果。脚本可以输出 Alfred
-兼容的 JSON：
-
-```json
-{
-  "id": "project",
-  "name": "项目搜索",
-  "keyword": "p",
-  "script_filter": true,
-  "command": ["/path/to/project-filter", "{query}"],
-  "actions": [
-    {
-      "title": "打开项目",
-      "subtitle": "使用默认程序打开",
-      "command": ["xdg-open", "{arg}"],
-      "icon": "document-open"
-    },
-    {
-      "title": "复制路径",
-      "command": ["wl-copy", "{arg}"],
-      "icon": "edit-copy"
-    }
-  ]
-}
-```
-
-输出可以是 `[ { "title": "…", "subtitle": "…", "arg": "…", "icon": "…" } ]`
-或 `{ "items": [ … ] }`；小脚本也可以每行输出 `标题<TAB>参数`。选择结果后，
-`actions` 会显示在候选项的 `Tab / →` 动作页，均支持 `{query}`（原始输入）和
-`{arg}`（当前候选参数）；直接按 Enter 会执行第一个动作。旧版单一 `action`
-字段仍兼容，并会被转换成默认动作。没有动作时，Alter 会把 `arg` 作为下一次
-Workflow 参数执行同一个命令。所有命令仍使用 argv，不经过 shell。脚本来自用户
-自己的配置，启用前请确认命令路径和权限。
-
-### Snippets
-
-可在 `~/.config/alter/snippets.json` 保存一个对象或数组。例如输入
-`sig Alter` 后，结果会把 `{query}` 替换为 `Alter`，按 Enter 将完整文本复制到
-剪贴板：
-
-```json
-[
-  {
-    "id": "signature",
-    "name": "邮件签名",
-    "keywords": ["sig", "签名"],
-    "content": "谢谢，\n{query}",
-    "enabled": true
-  }
-]
-```
-
-也可使用 `~/.config/alter/snippets.conf`，每行格式为
-`id|名称|关键词,别名|内容`；内容支持 `\n`、`\r`、`\t`、`\\` 和 `\|` 转义。
-Snippet 只复制展开结果，不读取 shell，也不会模拟键盘输入。
-
-### 剪贴板高级操作
-
-- 输入 `c `、`clip ` 或 `clipboard ` 进入剪贴板范围后，右侧预览面板会显示完整文本；Clipse 的图片文件会显示可滚动的大图，长文本可在面板内滚动查看。普通搜索会隐藏该面板，让结果列表保持完整宽度。
-- `Ctrl+Shift+P`：固定或取消固定当前剪贴板结果；固定项以星标显示，并不会因
-  保留期清理而过期。
-- Delete：在 Alter 中隐藏当前剪贴板结果，不会修改或重写 Clipse JSON。
-- Clipse 中带 `filePath` 的图片会显示缩略图，文件结果使用对应文件图标；按
-  Enter 会把图片 MIME 或文件 URI 写回 Wayland 剪贴板。
-- 保留期默认 30 天，可在设置中改为 1–3650 天。
-
-固定和隐藏状态保存在 Alter 自己的 SQLite metadata 表中。没有 Clipse 时，Alter
-自带的 `wl-paste --watch` 监听器目前只保存文本；图片和文件历史需要 Clipse。
-
-### 学习排序
-
-Alter 会在用户明确按 Enter 执行结果时记录使用次数和最近使用时间，并给常用的
-应用、文件、剪贴板、Web 搜索、Workflow 和 Snippet 增加有限的排序分数。频率
-加成有上限，时间加成会逐步衰减并在 30 天后归零，因此不会永久压过更匹配的
-新结果。空查询也会评估完整的应用索引，因此常用应用即使原本排在首屏之后仍
-可以被提升。可在设置中关闭“学习排序”。
-
-联系人、Safari/浏览器书签、iTunes 等 Alfred 的 macOS 专属集成不属于 Alter 当前 Wayland 目标；X11、GNOME、KDE 适配也暂不在范围内。
-
-## 数据位置
-
-- 设置：`~/.config/alter/settings.conf`
-- Web 模板：`~/.config/alter/web-searches.json` 或 `web-searches.conf`
-- Quick Links：`~/.config/alter/quick-links.json`
-- Workflow：`~/.config/alter/workflows/*.json`
-- Snippets：`~/.config/alter/snippets.json` 或 `snippets.conf`
-- 剪贴板、固定/隐藏 metadata 和使用统计：`~/.local/share/alter/history.sqlite3`
-
-如果检测到你现有的 `clipse -listen`，Alter 会直接读取
-`~/.config/clipse/clipboard_history.json`，不会再启动重复的监听器。没有
-Clipse 时，第一次打开 Alter 会启动自己的 `wl-paste --watch` 子进程；若手动结束
-Alter，监听进程也会被清理。
-
-剪贴板内容会以本地明文形式保存在 Clipse JSON 或 Alter SQLite 中；如果机器上有
-密码、令牌等敏感内容，请使用 Clipse 的清理/暂停功能或后续为 Alter 增加排除规则。
-
-## 已知限制
-
-- Alter 自带的剪贴板监听器只采集文本；图片和文件历史目前从 Clipse 读取。
-- 文件搜索依赖 `plocate` 数据库；数据库未更新时，新文件可能需要等待索引更新。
-- 剪贴板和 Snippet 结果只会写回剪贴板，不会自动向前一个窗口发送 Ctrl+V；
-  Wayland 安全模型不允许普通应用无条件向其他客户端注入按键。
-- 目前针对 Hyprland/Wayland，未实现 X11、GNOME 或 KDE 专用适配。
+MIT
