@@ -22,17 +22,12 @@ impl Language {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LanguagePreference {
+    #[default]
     System,
     Chinese,
     English,
-}
-
-impl Default for LanguagePreference {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 impl LanguagePreference {
@@ -78,20 +73,32 @@ impl LanguagePreference {
 }
 
 pub fn detect_system_language() -> Language {
-    let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
+    // LANGUAGE is the desktop UI language override used by gettext-based
+    // environments. LC_ALL/LC_MESSAGES still take precedence when they name
+    // an actual language, but C/POSIX are neutral English-compatible locales
+    // rather than a reason to fall back to Chinese.
+    let locale = ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"]
         .into_iter()
         .find_map(|name| env::var(name).ok().filter(|value| !value.is_empty()))
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if locale.starts_with("en") {
-        Language::English
-    } else if locale.starts_with("zh") {
+    language_for_locale(&locale)
+}
+
+fn language_for_locale(locale: &str) -> Language {
+    let locale = locale
+        .split(':')
+        .find(|candidate| !candidate.is_empty())
+        .unwrap_or(locale)
+        .trim()
+        .to_ascii_lowercase();
+    if locale.starts_with("zh") {
         Language::Chinese
     } else {
-        // Keep the historical Chinese UI for an unset/C locale.  Users can
-        // choose English explicitly in Settings when desired.
-        Language::Chinese
+        // English is also the fallback for C/POSIX and currently unsupported
+        // languages, matching the usual desktop locale convention.
+        Language::English
     }
 }
 
@@ -105,6 +112,7 @@ pub fn result_kind_label(kind: &ResultKind, language: Language) -> &'static str 
         ResultKind::Web => language.text("网页", "Web"),
         ResultKind::Workflow => language.text("工作流", "Workflow"),
         ResultKind::Snippet => language.text("片段", "Snippet"),
+        ResultKind::QuickLink => language.text("链接", "Link"),
     }
 }
 
@@ -150,6 +158,14 @@ pub fn localized_result(result: &SearchResult, language: Language) -> SearchResu
         }
         ResultKind::Snippet => {
             localized.subtitle = snippet_subtitle_in_english(&result.subtitle);
+        }
+        ResultKind::QuickLink => {
+            if result.payload.is_some() {
+                localized.subtitle = "Quick link · Open in default browser".to_owned();
+            } else {
+                localized.title = result.title.replace(" · 输入参数", " · Enter a parameter");
+                localized.subtitle = result.subtitle.replace("快速链接", "Quick link");
+            }
         }
         ResultKind::File => {}
     }
@@ -217,6 +233,15 @@ mod tests {
             LanguagePreference::parse("unknown"),
             LanguagePreference::System
         );
+    }
+
+    #[test]
+    fn maps_c_english_and_unknown_locales_to_english() {
+        for locale in ["C", "C.UTF-8", "POSIX", "en_US.UTF-8", "de_DE.UTF-8", ""] {
+            assert_eq!(language_for_locale(locale), Language::English, "{locale}");
+        }
+        assert_eq!(language_for_locale("zh_CN.UTF-8"), Language::Chinese);
+        assert_eq!(language_for_locale("zh_CN:en_US"), Language::Chinese);
     }
 
     #[test]

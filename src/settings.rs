@@ -16,6 +16,7 @@ pub struct Settings {
     pub clipboard_search: bool,
     pub web_search: bool,
     pub web_suggestions: bool,
+    pub quick_links: bool,
     pub workflow_search: bool,
     pub snippet_search: bool,
     pub learning_ranking: bool,
@@ -35,6 +36,7 @@ impl Default for Settings {
             clipboard_search: true,
             web_search: true,
             web_suggestions: true,
+            quick_links: true,
             workflow_search: true,
             snippet_search: true,
             learning_ranking: true,
@@ -81,11 +83,12 @@ pub fn save(settings: &Settings) -> io::Result<()> {
     let mut value = settings.clone();
     value.clamp();
     let content = format!(
-        "# Alter preferences\nfile_search={}\nclipboard_search={}\nweb_search={}\nweb_suggestions={}\nworkflow_search={}\nsnippet_search={}\nlearning_ranking={}\nshow_recent={}\nmax_results={}\nclipboard_retention_days={}\ntheme={}\nlanguage={}\n",
+        "# Alter preferences\nfile_search={}\nclipboard_search={}\nweb_search={}\nweb_suggestions={}\nquick_links={}\nworkflow_search={}\nsnippet_search={}\nlearning_ranking={}\nshow_recent={}\nmax_results={}\nclipboard_retention_days={}\ntheme={}\nlanguage={}\n",
         value.file_search,
         value.clipboard_search,
         value.web_search,
         value.web_suggestions,
+        value.quick_links,
         value.workflow_search,
         value.snippet_search,
         value.learning_ranking,
@@ -120,6 +123,7 @@ fn parse(content: &str) -> Settings {
             "web_suggestions" => {
                 settings.web_suggestions = parse_bool(value, settings.web_suggestions)
             }
+            "quick_links" => settings.quick_links = parse_bool(value, settings.quick_links),
             "workflow_search" => {
                 settings.workflow_search = parse_bool(value, settings.workflow_search)
             }
@@ -178,12 +182,13 @@ mod tests {
     #[test]
     fn parses_and_clamps_preferences() {
         let settings = parse(
-            "file_search=false\nclipboard_search=true\nweb_search=false\nweb_suggestions=0\nworkflow_search=no\nsnippet_search=false\nlearning_ranking=1\nshow_recent=no\nmax_results=1000\nclipboard_retention_days=9999\ntheme=light\nlanguage=en\n",
+            "file_search=false\nclipboard_search=true\nweb_search=false\nweb_suggestions=0\nquick_links=false\nworkflow_search=no\nsnippet_search=false\nlearning_ranking=1\nshow_recent=no\nmax_results=1000\nclipboard_retention_days=9999\ntheme=light\nlanguage=en\n",
         );
         assert!(!settings.file_search);
         assert!(settings.clipboard_search);
         assert!(!settings.web_search);
         assert!(!settings.web_suggestions);
+        assert!(!settings.quick_links);
         assert!(!settings.workflow_search);
         assert!(!settings.snippet_search);
         assert!(settings.learning_ranking);
@@ -206,6 +211,7 @@ mod tests {
 
         assert!(settings.web_search);
         assert!(settings.web_suggestions);
+        assert!(settings.quick_links);
         assert!(settings.workflow_search);
         assert!(settings.snippet_search);
         assert!(settings.learning_ranking);
@@ -215,11 +221,12 @@ mod tests {
     #[test]
     fn invalid_feature_switches_keep_their_defaults() {
         let settings = parse(
-            "web_search=maybe\nweb_suggestions=enabled\nworkflow_search=invalid\nsnippet_search=perhaps\nlearning_ranking=unknown\n",
+            "web_search=maybe\nweb_suggestions=enabled\nquick_links=sometimes\nworkflow_search=invalid\nsnippet_search=perhaps\nlearning_ranking=unknown\n",
         );
 
         assert!(settings.web_search);
         assert!(settings.web_suggestions);
+        assert!(settings.quick_links);
         assert!(settings.workflow_search);
         assert!(settings.snippet_search);
         assert!(settings.learning_ranking);

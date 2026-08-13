@@ -11,8 +11,9 @@ window {
 }
 
 .search-page,
-.settings-scroller,
-.settings-scroller viewport {
+.settings-content-stack,
+.settings-content-scroller,
+.settings-content-scroller viewport {
   background-color: transparent;
   border: 0;
 }
@@ -283,6 +284,12 @@ window {
   color: #efafd0;
 }
 
+.quick-link-icon-frame {
+  border-color: rgba(91, 196, 229, 0.15);
+  background-color: rgba(63, 173, 211, 0.10);
+  color: #8eddf4;
+}
+
 .result-labels {
   min-height: 38px;
 }
@@ -361,6 +368,12 @@ window {
   color: #efafd0;
 }
 
+.quick-link-badge {
+  border: 1px solid rgba(91, 196, 229, 0.19);
+  background-color: rgba(63, 173, 211, 0.12);
+  color: #8eddf4;
+}
+
 .results row:selected .web-badge {
   border-color: rgba(126, 219, 246, 0.25);
   background-color: rgba(63, 173, 211, 0.20);
@@ -377,6 +390,12 @@ window {
   border-color: rgba(246, 187, 215, 0.25);
   background-color: rgba(218, 117, 165, 0.20);
   color: #f8d0e3;
+}
+
+.results row:selected .quick-link-badge {
+  border-color: rgba(126, 219, 246, 0.25);
+  background-color: rgba(63, 173, 211, 0.20);
+  color: #b8edfb;
 }
 
 .pin-slot {
@@ -559,11 +578,14 @@ window {
 }
 
 .settings-page {
-  padding: 20px 24px 24px 24px;
+  min-height: 0;
 }
 
 .settings-header {
-  min-height: 40px;
+  min-height: 54px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(185, 194, 220, 0.08);
+  background-color: rgba(24, 27, 38, 0.58);
 }
 
 .settings-mark {
@@ -574,7 +596,7 @@ window {
 
 .settings-title {
   color: #edf0fa;
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 720;
 }
 
@@ -585,25 +607,79 @@ window {
   border-radius: 10px;
   background-color: rgba(169, 140, 245, 0.12);
   color: #d9cdfa;
+  font-size: 13px;
   font-weight: 650;
 }
 
-.settings-description,
-.settings-shortcut {
-  color: rgba(181, 189, 213, 0.51);
+.settings-layout,
+.settings-content-stack,
+.settings-content-page,
+.settings-content-scroller {
+  min-height: 0;
+}
+
+.settings-sidebar {
+  min-width: 206px;
+  padding: 12px 10px 10px 10px;
+  border-right: 1px solid rgba(185, 194, 220, 0.08);
+  background-color: rgba(24, 27, 38, 0.48);
+}
+
+.settings-navigation {
+  background-color: transparent;
+}
+
+.settings-navigation-row {
+  margin: 2px 0;
+  border-radius: 10px;
+  background-color: transparent;
+}
+
+.settings-navigation-row:hover {
+  background-color: rgba(185, 194, 220, 0.06);
+}
+
+.settings-navigation-row:selected {
+  background-color: rgba(145, 111, 226, 0.22);
+  box-shadow: inset 3px 0 #9c78eb;
+}
+
+.settings-navigation-icon {
+  color: rgba(205, 211, 232, 0.66);
+}
+
+.settings-navigation-title {
+  color: rgba(220, 225, 240, 0.82);
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.settings-navigation-row:selected .settings-navigation-icon,
+.settings-navigation-row:selected .settings-navigation-title {
+  color: #eee8ff;
+}
+
+.settings-sidebar-footer {
+  padding: 12px 10px 2px 10px;
+  color: rgba(181, 189, 213, 0.40);
   font-size: 11px;
+  line-height: 1.5;
 }
 
-.settings-description {
-  margin: 4px 0 13px 40px;
+.settings-content-page {
+  padding: 20px 24px 22px 24px;
 }
 
-.settings-section-title {
-  margin: 11px 2px 6px 2px;
-  color: rgba(187, 195, 220, 0.53);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 1.1px;
+.settings-content-title {
+  color: #edf0fa;
+  font-size: 22px;
+  font-weight: 720;
+}
+
+.settings-content-description {
+  margin: 3px 0 15px 0;
+  color: rgba(181, 189, 213, 0.51);
+  font-size: 12px;
 }
 
 .settings-group {
@@ -625,13 +701,13 @@ window {
 
 .setting-title {
   color: #dce1f0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 630;
 }
 
 .setting-description {
   color: rgba(181, 189, 213, 0.47);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .setting-switch {
@@ -673,6 +749,7 @@ window {
   border-radius: 10px;
   background-color: rgba(28, 31, 43, 0.58);
   color: #dce1f0;
+  font-size: 13px;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
 }
 
@@ -694,6 +771,120 @@ window {
 .settings-status {
   color: #91d7a7;
   font-size: 11px;
+}
+
+.quick-links-group {
+  min-height: 0;
+}
+
+.quick-links-editor-box {
+  min-height: 0;
+  padding: 0 12px 10px 12px;
+}
+
+.quick-link-editor-stack,
+.quick-link-inline-editor {
+  min-height: 0;
+}
+
+.quick-link-inline-editor {
+  padding: 2px 14px 14px 14px;
+}
+
+.quick-link-editor-title {
+  color: #e4e8f5;
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.quick-link-field-label {
+  color: rgba(203, 209, 229, 0.72);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.quick-link-inline-editor entry {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(185, 194, 220, 0.13);
+  border-radius: 9px;
+  background-color: rgba(18, 20, 28, 0.48);
+  color: #e4e8f5;
+  font-size: 13px;
+}
+
+.quick-link-inline-editor entry:focus {
+  border-color: rgba(169, 140, 245, 0.52);
+  box-shadow: 0 0 0 2px rgba(145, 111, 226, 0.10);
+}
+
+.quick-link-editor-hint {
+  color: rgba(181, 189, 213, 0.49);
+  font-size: 12px;
+}
+
+.quick-links-scroller {
+  min-height: 0;
+  border: 1px solid rgba(185, 194, 220, 0.09);
+  border-radius: 11px;
+  background-color: rgba(18, 20, 28, 0.30);
+}
+
+.quick-links-scroller viewport,
+.quick-links-list {
+  border: 0;
+  background-color: transparent;
+}
+
+.quick-link-setting-row {
+  border-bottom: 1px solid rgba(185, 194, 220, 0.06);
+  background-color: transparent;
+}
+
+.quick-link-setting-row:last-child {
+  border-bottom: 0;
+}
+
+.quick-link-setting-row:selected {
+  background-color: rgba(145, 111, 226, 0.16);
+}
+
+.quick-link-title {
+  color: #dce1f0;
+  font-size: 15px;
+  font-weight: 630;
+}
+
+.quick-link-subtitle,
+.quick-links-status {
+  color: rgba(181, 189, 213, 0.49);
+  font-size: 12px;
+}
+
+.quick-links-status {
+  margin: 0;
+}
+
+.quick-link-button {
+  min-height: 30px;
+  padding: 0 12px;
+  margin-bottom: 2px;
+  border: 1px solid rgba(185, 194, 220, 0.13);
+  border-radius: 9px;
+  background-color: rgba(28, 31, 43, 0.58);
+  color: #dce1f0;
+  font-size: 13px;
+}
+
+.quick-link-save-button {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(169, 140, 245, 0.34);
+  border-radius: 9px;
+  background-color: rgba(145, 111, 226, 0.28);
+  color: #eee8ff;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 scrollbar trough {
@@ -718,9 +909,8 @@ scrollbar slider {
 .surface.light .brand-name,
 .surface.light .status,
 .surface.light .shortcut-hint,
-.surface.light .settings-description,
-.surface.light .settings-shortcut,
-.surface.light .settings-section-title,
+.surface.light .settings-content-description,
+.surface.light .settings-sidebar-footer,
 .surface.light .setting-description,
 .surface.light .result-subtitle,
 .surface.light .action-subtitle,
@@ -930,6 +1120,35 @@ scrollbar slider {
   color: #5f3f9b;
 }
 
+.surface.light .settings-header,
+.surface.light .settings-sidebar {
+  border-color: rgba(54, 59, 82, 0.09);
+  background-color: rgba(232, 234, 243, 0.52);
+}
+
+.surface.light .settings-content-title,
+.surface.light .settings-navigation-title {
+  color: #303448;
+}
+
+.surface.light .settings-navigation-icon {
+  color: rgba(48, 52, 72, 0.62);
+}
+
+.surface.light .settings-navigation-row:hover {
+  background-color: rgba(78, 84, 111, 0.06);
+}
+
+.surface.light .settings-navigation-row:selected {
+  background-color: rgba(111, 78, 190, 0.12);
+  box-shadow: inset 3px 0 #7650c6;
+}
+
+.surface.light .settings-navigation-row:selected .settings-navigation-icon,
+.surface.light .settings-navigation-row:selected .settings-navigation-title {
+  color: #583890;
+}
+
 .surface.light .setting-row switch {
   border-color: rgba(54, 59, 82, 0.13);
   background-color: rgba(75, 80, 105, 0.20);
@@ -954,4 +1173,50 @@ scrollbar slider {
 
 .surface.light .setting-row spinbutton entry {
   color: #303448;
+}
+
+.surface.light .quick-links-scroller,
+.surface.light .quick-link-button {
+  border-color: rgba(54, 59, 82, 0.11);
+  background-color: rgba(255, 255, 255, 0.58);
+}
+
+.surface.light .quick-links-scroller viewport,
+.surface.light .quick-links-list {
+  background-color: transparent;
+}
+
+.surface.light .quick-link-editor-title,
+.surface.light .quick-link-field-label {
+  color: #303448;
+}
+
+.surface.light .quick-link-inline-editor entry {
+  border-color: rgba(54, 59, 82, 0.12);
+  background-color: rgba(255, 255, 255, 0.72);
+  color: #303448;
+}
+
+.surface.light .quick-link-editor-hint {
+  color: rgba(48, 52, 72, 0.52);
+}
+
+.surface.light .quick-link-save-button {
+  border-color: rgba(111, 78, 190, 0.24);
+  background-color: rgba(111, 78, 190, 0.14);
+  color: #583890;
+}
+
+.surface.light .quick-link-title,
+.surface.light .quick-link-button {
+  color: #303448;
+}
+
+.surface.light .quick-link-subtitle,
+.surface.light .quick-links-status {
+  color: rgba(48, 52, 72, 0.52);
+}
+
+.surface.light .quick-link-setting-row:selected {
+  background-color: rgba(111, 78, 190, 0.10);
 }

@@ -17,6 +17,7 @@
 - 通过 StatusNotifierItem 在 Waybar 托盘常驻，菜单可打开、进入设置或退出
 - 剪贴板默认保留 30 天，可在设置中调整为 1–3650 天
 - 界面支持简体中文和 English；默认跟随系统语言，也可在设置中手动选择
+- 支持 Alfred 风格 Quick Links：在设置中配置关键词和 URL 模板，输入关键词与参数后快速跳转
 - 支持 Google、Bing、DuckDuckGo Web 搜索及可选搜索建议
 - 支持文件动作面板、关键词 Workflow、自定义 Snippets 和使用频率学习排序
 - 全部操作支持键盘：Enter、↑、↓、Tab / →、Esc
@@ -104,11 +105,12 @@ Alter 目前聚焦于 **Hyprland + Wayland 的本地启动与搜索**。下表�
 | 设置与主题 | 已有基础设置 | 完整偏好、主题和同步 | Alter 支持深浅主题与各搜索模块开关，目前只保存本地配置 |
 | 托盘常驻 | 已有 | 菜单栏常驻 | Alter 使用 StatusNotifierItem，适配 Waybar |
 | Web 搜索、建议 | 已有 | 已有 | 使用 `? query`、`web query` 或 `g/b/ddg query` |
+| Quick Links / 快速链接 | 已有 | 已有 | 设置中管理关键词和 URL 模板，只在显式关键词调用时显示 |
 | 文件操作/Universal Actions | 基础已有 | 已有 | Alter 支持打开、定位、复制路径/URI 和经确认移入回收站，尚无多步动作链 |
 | Snippets / 文本展开 | 基础已有 | 已有 | Alter 支持关键词与 `{query}` 替换并复制内容；Wayland 下不注入按键自动粘贴 |
 | Workflow / 插件系统 | 基础已有 | 已有 | Alter 支持 JSON manifest、关键词触发、argv 命令、cwd/env/icon、Script Filter 和多个命名动作，尚无可视化编辑和复杂编排 |
 | 学习排序、搜索历史 | 已有 | 已有 | Alter 按明确选择的频率和时间提升常用结果，可在设置中关闭 |
-| Shell 命令、URL、书签、联系人等扩展 | 部分 | 已有（部分为 macOS 集成） | URL 和 argv 命令可通过 Workflow 扩展，书签/联系人等尚无原生索引 |
+| Shell 命令、URL、书签、联系人等扩展 | 部分 | 已有（部分为 macOS 集成） | URL 可用可视化 Quick Links，argv 命令可通过 Workflow 扩展；书签/联系人等尚无原生索引 |
 | 配置导入/导出、跨设备同步 | 暂无 | 已有 | Alter 目前是单机配置 |
 
 仍值得继续补齐的三项是：
@@ -155,6 +157,28 @@ Bing 和 DuckDuckGo 都带有轻量建议接口；网络或 `curl` 不可用时�
 
 Web 搜索和联网建议可分别在 Alter 设置中关闭。关闭建议后不会发起建议请求，
 自定义 URL 仍由 `xdg-open` 交给系统默认浏览器。
+
+### Quick Links / 快速链接
+
+Quick Links 用于“关键词 + 参数 → URL”的精确跳转。可在 Alter 设置的“快速链接”
+区域新增、编辑或删除，不需要编写 Workflow。例如配置：
+
+```text
+名称：工单详情
+关键词：job
+URL 模板：https://example.com/jobs/detail?job_id={query}
+```
+
+之后输入 `job j-056rekk80h`，Alter 会显示一条“链接”结果；按 Enter 后打开：
+
+```text
+https://example.com/jobs/detail?job_id=j-056rekk80h
+```
+
+每个模板必须使用 `http` 或 `https` 并包含 `{query}`。参数会作为 URL 组件进行
+UTF-8 百分号编码，不经过 shell。Quick Links 只响应完整的显式关键词，不会出现在
+应用、文件或剪贴板等普通搜索结果中。配置保存在
+`~/.config/alter/quick-links.json`，在设置中修改后立即生效。
 
 ### 文件动作
 
@@ -280,6 +304,7 @@ Alter 会在用户明确按 Enter 执行结果时记录使用次数和最近使�
 
 - 设置：`~/.config/alter/settings.conf`
 - Web 模板：`~/.config/alter/web-searches.json` 或 `web-searches.conf`
+- Quick Links：`~/.config/alter/quick-links.json`
 - Workflow：`~/.config/alter/workflows/*.json`
 - Snippets：`~/.config/alter/snippets.json` 或 `snippets.conf`
 - 剪贴板、固定/隐藏 metadata 和使用统计：`~/.local/share/alter/history.sqlite3`

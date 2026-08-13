@@ -3,6 +3,7 @@ use crate::actions::{
 };
 use crate::clipboard::{self, ClipboardWatcher};
 use crate::i18n::{self, Language, LanguagePreference};
+use crate::quick_links::{self, QuickLink, QuickLinkCatalog};
 use crate::search::{ResultKind, ResultPayload, SearchEngine, SearchResult};
 use crate::settings::{self, Settings, SharedSettings, Theme};
 use crate::workflow::WorkflowMatch;
@@ -10,9 +11,9 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{
-    Align, ApplicationWindow, Box as GtkBox, Button, CenterBox, ContentFit, DropDown, Image, Label,
-    ListBox, ListBoxRow, Orientation, Paned, Picture, ScrolledWindow, SearchEntry, SelectionMode,
-    SpinButton, Stack, Switch, TextView, WrapMode,
+    Align, ApplicationWindow, Box as GtkBox, Button, CenterBox, ContentFit, DropDown, Entry, Image,
+    Label, ListBox, ListBoxRow, Orientation, Paned, Picture, ScrolledWindow, SearchEntry,
+    SelectionMode, SpinButton, Stack, Switch, TextView, WrapMode,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -30,6 +31,7 @@ struct SearchMessage {
 struct SettingsWidgets {
     page: GtkBox,
     done: Button,
+    navigation: ListBox,
     file_switch: Switch,
     clipboard_switch: Switch,
     web_switch: Switch,
@@ -42,7 +44,45 @@ struct SettingsWidgets {
     retention_days: SpinButton,
     theme: DropDown,
     language: DropDown,
+    quick_links_switch: Switch,
+    quick_links_list: ListBox,
+    quick_link_add: Button,
+    quick_link_edit: Button,
+    quick_link_delete: Button,
+    quick_link_editor_stack: Stack,
+    quick_link_editor_title: Label,
+    quick_link_id: Entry,
+    quick_link_name: Entry,
+    quick_link_keywords: Entry,
+    quick_link_template: Entry,
+    quick_link_editor_hint: Label,
+    quick_link_save: Button,
+    quick_link_cancel: Button,
+    quick_link_editing_id: Rc<RefCell<Option<String>>>,
+    quick_links_status: Label,
+    quick_links: Rc<RefCell<Vec<QuickLink>>>,
     status: Label,
+}
+
+struct QuickLinksWidgets {
+    group: GtkBox,
+    enabled: Switch,
+    list: ListBox,
+    add: Button,
+    edit: Button,
+    delete: Button,
+    editor_stack: Stack,
+    editor_title: Label,
+    id: Entry,
+    name: Entry,
+    keywords: Entry,
+    template: Entry,
+    editor_hint: Label,
+    save: Button,
+    cancel: Button,
+    editing_id: Rc<RefCell<Option<String>>>,
+    status: Label,
+    links: Rc<RefCell<Vec<QuickLink>>>,
 }
 
 struct ActionWidgets {
@@ -89,6 +129,9 @@ pub struct UiState {
     pub window: ApplicationWindow,
     entry: SearchEntry,
     stack: Stack,
+    settings_navigation: ListBox,
+    quick_link_editor_stack: Stack,
+    quick_link_editing_id: Rc<RefCell<Option<String>>>,
     preview: PreviewWidgets,
     refresh: Rc<dyn Fn()>,
     watcher: Option<ClipboardWatcher>,
@@ -132,9 +175,12 @@ impl UiState {
     }
 
     pub fn show_settings(&self) {
+        *self.quick_link_editing_id.borrow_mut() = None;
+        self.quick_link_editor_stack.set_visible_child_name("list");
         self.stack.set_visible_child_name("settings");
         self.window.set_visible(true);
         self.window.present();
+        focus_settings_navigation(&self.settings_navigation);
     }
 
     pub fn stop_watcher(&mut self) {
@@ -286,25 +332,11 @@ pub fn build(
     search_page.append(&footer);
 
     let settings_widgets = build_settings_page(&preferences, language);
-    // Keep the launcher surface at its compact search height even when the
-    // preferences page grows.  The settings content remains fully reachable
-    // with a normal vertical scrollbar instead of forcing the layer surface
-    // beyond the user's usable screen area.
-    let settings_scroller = ScrolledWindow::builder()
-        .child(&settings_widgets.page)
-        .vexpand(true)
-        .hexpand(true)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .propagate_natural_height(false)
-        .propagate_natural_width(false)
-        .build();
-    settings_scroller.add_css_class("settings-scroller");
     let action_widgets = build_action_page(language);
     let stack = Stack::new();
     stack.set_vexpand(true);
     stack.add_named(&search_page, Some("search"));
-    stack.add_named(&settings_scroller, Some("settings"));
+    stack.add_named(&settings_widgets.page, Some("settings"));
     stack.add_named(&action_widgets.page, Some("actions"));
     stack.set_visible_child_name("search");
     surface.append(&stack);
@@ -339,14 +371,24 @@ pub fn build(
 
     {
         let stack = stack.clone();
+        let navigation = settings_widgets.navigation.clone();
+        let editor_stack = settings_widgets.quick_link_editor_stack.clone();
+        let editing_id = settings_widgets.quick_link_editing_id.clone();
         settings_button.connect_clicked(move |_| {
+            *editing_id.borrow_mut() = None;
+            editor_stack.set_visible_child_name("list");
             stack.set_visible_child_name("settings");
+            focus_settings_navigation(&navigation);
         });
     }
     {
         let stack = stack.clone();
         let entry = entry.clone();
+        let editor_stack = settings_widgets.quick_link_editor_stack.clone();
+        let editing_id = settings_widgets.quick_link_editing_id.clone();
         settings_widgets.done.connect_clicked(move |_| {
+            *editing_id.borrow_mut() = None;
+            editor_stack.set_visible_child_name("list");
             stack.set_visible_child_name("search");
             entry.grab_focus();
         });
@@ -471,6 +513,10 @@ pub fn build(
         let action_subtitle_for_keys = action_widgets.subtitle.clone();
         let action_context_for_keys = action_context.clone();
         let refresh_for_keys = refresh.clone();
+        let quick_link_editor_for_keys = settings_widgets.quick_link_editor_stack.clone();
+        let quick_link_editing_id_for_keys = settings_widgets.quick_link_editing_id.clone();
+        let quick_links_list_for_keys = settings_widgets.quick_links_list.clone();
+        let settings_navigation_for_keys = settings_widgets.navigation.clone();
         key_controller.connect_key_pressed(move |_, key, _, modifiers| {
             use gdk::Key;
             let in_settings = stack_for_keys
@@ -480,11 +526,22 @@ pub fn build(
                 .visible_child_name()
                 .is_some_and(|name| name.as_str() == "actions");
             if key == Key::comma && modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+                *quick_link_editing_id_for_keys.borrow_mut() = None;
+                quick_link_editor_for_keys.set_visible_child_name("list");
                 stack_for_keys.set_visible_child_name("settings");
+                focus_settings_navigation(&settings_navigation_for_keys);
                 return glib::Propagation::Stop;
             }
             if key == Key::Escape {
-                if in_settings || in_actions {
+                if in_settings
+                    && quick_link_editor_for_keys
+                        .visible_child_name()
+                        .is_some_and(|name| name.as_str() == "form")
+                {
+                    *quick_link_editing_id_for_keys.borrow_mut() = None;
+                    quick_link_editor_for_keys.set_visible_child_name("list");
+                    focus_list_selection(&quick_links_list_for_keys);
+                } else if in_settings || in_actions {
                     stack_for_keys.set_visible_child_name("search");
                     entry_for_keys.grab_focus();
                 } else {
@@ -617,6 +674,9 @@ pub fn build(
         window,
         entry,
         stack,
+        settings_navigation: settings_widgets.navigation,
+        quick_link_editor_stack: settings_widgets.quick_link_editor_stack,
+        quick_link_editing_id: settings_widgets.quick_link_editing_id,
         preview,
         refresh,
         watcher,
@@ -698,6 +758,7 @@ fn render_results(
                 ResultKind::Web => "web-row",
                 ResultKind::Workflow => "workflow-row",
                 ResultKind::Snippet => "snippet-row",
+                ResultKind::QuickLink => "quick-link-row",
             });
             if result.clipboard_pinned {
                 row.add_css_class("pinned-row");
@@ -722,6 +783,7 @@ fn render_results(
                 ResultKind::Web => "web-icon-frame",
                 ResultKind::Workflow => "workflow-icon-frame",
                 ResultKind::Snippet => "snippet-icon-frame",
+                ResultKind::QuickLink => "quick-link-icon-frame",
             });
             icon_frame.set_valign(Align::Center);
             icon_frame.set_halign(Align::Center);
@@ -740,6 +802,7 @@ fn render_results(
                 ResultKind::Web => "web-badge",
                 ResultKind::Workflow => "workflow-badge",
                 ResultKind::Snippet => "snippet-badge",
+                ResultKind::QuickLink => "quick-link-badge",
             });
             badge.set_valign(Align::Center);
             badge.set_xalign(0.5);
@@ -1447,6 +1510,27 @@ fn move_selection_without_scroller(list: &ListBox, step: i32) {
     }
 }
 
+fn focus_settings_navigation(navigation: &ListBox) {
+    if let Some(row) = navigation
+        .selected_row()
+        .or_else(|| navigation.row_at_index(0))
+    {
+        navigation.select_row(Some(&row));
+        row.grab_focus();
+    } else {
+        navigation.grab_focus();
+    }
+}
+
+fn focus_list_selection(list: &ListBox) {
+    if let Some(row) = list.selected_row().or_else(|| list.row_at_index(0)) {
+        list.select_row(Some(&row));
+        row.grab_focus();
+    } else {
+        list.grab_focus();
+    }
+}
+
 fn result_icon(result: &SearchResult) -> Image {
     let image = match result.kind {
         ResultKind::App => result
@@ -1488,6 +1572,14 @@ fn result_icon(result: &SearchResult) -> Image {
                 )
             }),
         ResultKind::Snippet => themed_icon(&["insert-text-symbolic"], "text-x-generic-symbolic"),
+        ResultKind::QuickLink => themed_icon(
+            &[
+                "insert-link-symbolic",
+                "insert-link",
+                "web-browser-symbolic",
+            ],
+            "web-browser-symbolic",
+        ),
     };
     image.set_pixel_size(32);
     image.set_size_request(32, 32);
@@ -1589,6 +1681,20 @@ fn bundled_icon(name: &str) -> Option<Image> {
     let bytes: &[u8] = match name {
         "app-default.svg" => include_bytes!("../resources/icons/app-default.svg"),
         "settings.svg" => include_bytes!("../resources/icons/settings.svg"),
+        "settings-general.svg" => include_bytes!("../resources/icons/settings-general.svg"),
+        "settings-web.svg" => include_bytes!("../resources/icons/settings-web.svg"),
+        "settings-quick-links.svg" => {
+            include_bytes!("../resources/icons/settings-quick-links.svg")
+        }
+        "settings-clipboard.svg" => {
+            include_bytes!("../resources/icons/settings-clipboard.svg")
+        }
+        "settings-extensions.svg" => {
+            include_bytes!("../resources/icons/settings-extensions.svg")
+        }
+        "settings-appearance.svg" => {
+            include_bytes!("../resources/icons/settings-appearance.svg")
+        }
         _ => return None,
     };
     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
@@ -1750,6 +1856,14 @@ fn activate_index(
                 });
             }
         }
+        ResultKind::QuickLink => {
+            if let Some(ResultPayload::QuickLink(action)) = result.payload {
+                window.set_visible(false);
+                if let Err(error) = action.open() {
+                    eprintln!("alter: quick link failed: {error}");
+                }
+            }
+        }
     }
 }
 
@@ -1780,6 +1894,12 @@ fn record_result_usage(database: &Path, result: &SearchResult) {
             _ => return,
         },
         ResultKind::Snippet => (format!("snippet:{}", result.target.display()), "snippet"),
+        ResultKind::QuickLink => match result.payload.as_ref() {
+            Some(ResultPayload::QuickLink(action)) => {
+                (format!("quick-link:{}", action.link_id), "quick-link")
+            }
+            _ => return,
+        },
     };
     let _ = crate::usage::record_use(database, &key, &result.title, kind);
 }
@@ -1825,6 +1945,7 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.add_css_class("settings-page");
     page.set_vexpand(true);
+    page.set_hexpand(true);
 
     let header = GtkBox::new(Orientation::Horizontal, 10);
     header.add_css_class("settings-header");
@@ -1832,26 +1953,25 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
     settings_mark.add_css_class("settings-mark");
     settings_mark.set_valign(Align::Center);
     header.append(&settings_mark);
+    let heading = GtkBox::new(Orientation::Vertical, 1);
+    heading.set_hexpand(true);
+    heading.set_valign(Align::Center);
     let title = Label::new(Some(language.text("Alter 设置", "Alter Settings")));
     title.add_css_class("settings-title");
     title.set_xalign(0.0);
-    title.set_hexpand(true);
-    title.set_valign(Align::Center);
-    header.append(&title);
+    heading.append(&title);
+    let status = Label::new(Some(
+        language.text("修改会自动保存", "Changes are saved automatically"),
+    ));
+    status.add_css_class("settings-status");
+    status.set_xalign(0.0);
+    heading.append(&status);
+    header.append(&heading);
     let done = Button::with_label(language.text("完成", "Done"));
     done.add_css_class("done-button");
     done.set_valign(Align::Center);
     header.append(&done);
     page.append(&header);
-
-    let description = Label::new(Some(language.text(
-        "这些偏好会自动保存到 ~/.config/alter/settings.conf",
-        "These preferences are saved automatically to ~/.config/alter/settings.conf",
-    )));
-    description.add_css_class("settings-description");
-    description.set_xalign(0.0);
-    description.set_wrap(true);
-    page.append(&description);
 
     let search_group = GtkBox::new(Orientation::Vertical, 0);
     search_group.add_css_class("settings-group");
@@ -1920,8 +2040,6 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
     );
     extensions_group.append(&snippet_row);
 
-    let ranking_group = GtkBox::new(Orientation::Vertical, 0);
-    ranking_group.add_css_class("settings-group");
     let (learning_row, learning_switch) = switch_setting_row(
         language.text("学习排序", "Usage-based ranking"),
         language.text(
@@ -1930,8 +2048,6 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
         ),
         current.learning_ranking,
     );
-    ranking_group.append(&learning_row);
-
     let (recent_row, recent_switch) = switch_setting_row(
         language.text(
             "空白搜索显示最近项目",
@@ -1959,6 +2075,7 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
         &max_results,
     );
     search_group.append(&max_row);
+    search_group.append(&learning_row);
 
     let retention_days = SpinButton::with_range(1.0, 3650.0, 1.0);
     retention_days.set_value(current.clipboard_retention_days as f64);
@@ -1989,8 +2106,11 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
         language.text("切换 Alter 浮层的配色", "Change Alter's overlay colors"),
         &theme,
     );
-    let language_dropdown =
-        DropDown::from_strings(&["跟随系统 / System", "简体中文 / Chinese", "English"]);
+    let language_dropdown = DropDown::from_strings(&[
+        language.text("跟随系统", "System"),
+        language.text("简体中文", "Simplified Chinese"),
+        "English",
+    ]);
     language_dropdown.set_selected(current.language.selected_index());
     language_dropdown.set_width_request(180);
     let language_row = control_setting_row(
@@ -2004,45 +2124,177 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
     let appearance_group = GtkBox::new(Orientation::Vertical, 0);
     appearance_group.add_css_class("settings-group");
     appearance_group.append(&theme_row);
+    appearance_group.append(&language_row);
 
-    page.append(&settings_section_title(language.text("搜索", "Search")));
-    page.append(&search_group);
-    page.append(&settings_section_title(language.text("网页", "Web")));
-    page.append(&web_group);
-    page.append(&settings_section_title(language.text("扩展", "Extensions")));
-    page.append(&extensions_group);
-    page.append(&settings_section_title(
-        language.text("剪贴板", "Clipboard"),
-    ));
-    page.append(&clipboard_group);
-    page.append(&settings_section_title(
-        language.text("隐私与排序", "Privacy & ranking"),
-    ));
-    page.append(&ranking_group);
-    page.append(&settings_section_title(language.text("外观", "Appearance")));
-    page.append(&appearance_group);
-    page.append(&language_row);
+    let quick_links_widgets = build_quick_links_group(language, current.quick_links);
 
-    let status = Label::new(Some(
-        language.text("修改会自动保存", "Changes are saved automatically"),
-    ));
-    status.add_css_class("settings-status");
-    status.set_xalign(0.0);
-    status.set_margin_top(12);
-    page.append(&status);
+    let content_stack = Stack::new();
+    content_stack.add_css_class("settings-content-stack");
+    content_stack.set_hexpand(true);
+    content_stack.set_vexpand(true);
+    content_stack.set_vhomogeneous(false);
+    content_stack.set_transition_type(gtk::StackTransitionType::Crossfade);
+    content_stack.set_transition_duration(120);
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("通用", "General"),
+            language.text(
+                "控制全局搜索结果、最近项目和本机学习排序。",
+                "Control global search results, recent items, and on-device ranking.",
+            ),
+            &search_group,
+            true,
+        ),
+        Some("general"),
+    );
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("网页", "Web"),
+            language.text(
+                "配置显式网页搜索和联网搜索建议。",
+                "Configure explicit web search and online suggestions.",
+            ),
+            &web_group,
+            true,
+        ),
+        Some("web"),
+    );
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("快速链接", "Quick Links"),
+            language.text(
+                "管理“关键词 + 参数”到网址的跳转规则。",
+                "Manage keyword-and-parameter shortcuts to URLs.",
+            ),
+            &quick_links_widgets.group,
+            false,
+        ),
+        Some("quick-links"),
+    );
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("剪贴板", "Clipboard"),
+            language.text(
+                "控制搜索结果中的剪贴板内容及本地保留时间。",
+                "Control clipboard search results and local retention.",
+            ),
+            &clipboard_group,
+            true,
+        ),
+        Some("clipboard"),
+    );
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("扩展", "Extensions"),
+            language.text(
+                "启用 Workflow 和可复制的文本片段。",
+                "Enable Workflows and copyable text snippets.",
+            ),
+            &extensions_group,
+            true,
+        ),
+        Some("extensions"),
+    );
+    content_stack.add_named(
+        &settings_category_page(
+            language.text("外观", "Appearance"),
+            language.text(
+                "选择 Alter 的配色和界面语言。",
+                "Choose Alter's colors and interface language.",
+            ),
+            &appearance_group,
+            true,
+        ),
+        Some("appearance"),
+    );
 
-    let shortcut = Label::new(Some(language.text(
-        "快捷键：Super+Space 全局搜索 · Super+Shift+C 剪贴板 · Ctrl+, 设置 · Esc 返回/关闭",
-        "Shortcuts: Super+Space Search · Super+Shift+C Clipboard · Ctrl+, Settings · Esc Back/close",
+    let sidebar = GtkBox::new(Orientation::Vertical, 0);
+    sidebar.add_css_class("settings-sidebar");
+    sidebar.set_width_request(206);
+    sidebar.set_vexpand(true);
+    let navigation = ListBox::new();
+    navigation.add_css_class("settings-navigation");
+    navigation.set_selection_mode(SelectionMode::Single);
+    navigation.set_activate_on_single_click(true);
+    for row in [
+        settings_navigation_row(
+            language.text("通用", "General"),
+            "settings-general.svg",
+            "preferences-system-symbolic",
+        ),
+        settings_navigation_row(
+            language.text("网页", "Web"),
+            "settings-web.svg",
+            "web-browser-symbolic",
+        ),
+        settings_navigation_row(
+            language.text("快速链接", "Quick Links"),
+            "settings-quick-links.svg",
+            "insert-link-symbolic",
+        ),
+        settings_navigation_row(
+            language.text("剪贴板", "Clipboard"),
+            "settings-clipboard.svg",
+            "edit-paste-symbolic",
+        ),
+        settings_navigation_row(
+            language.text("扩展", "Extensions"),
+            "settings-extensions.svg",
+            "applications-utilities-symbolic",
+        ),
+        settings_navigation_row(
+            language.text("外观", "Appearance"),
+            "settings-appearance.svg",
+            "preferences-desktop-display-symbolic",
+        ),
+    ] {
+        navigation.append(&row);
+    }
+    sidebar.append(&navigation);
+    let sidebar_footer = Label::new(Some(language.text(
+        "Ctrl+, 打开设置\nEsc 返回搜索",
+        "Ctrl+, Open Settings\nEsc Back to Search",
     )));
-    shortcut.add_css_class("settings-shortcut");
-    shortcut.set_xalign(0.0);
-    shortcut.set_wrap(true);
-    page.append(&shortcut);
+    sidebar_footer.add_css_class("settings-sidebar-footer");
+    sidebar_footer.set_xalign(0.0);
+    sidebar_footer.set_yalign(1.0);
+    sidebar_footer.set_vexpand(true);
+    sidebar.append(&sidebar_footer);
+
+    const CATEGORY_NAMES: [&str; 6] = [
+        "general",
+        "web",
+        "quick-links",
+        "clipboard",
+        "extensions",
+        "appearance",
+    ];
+    let stack_for_navigation = content_stack.clone();
+    navigation.connect_row_selected(move |_, row| {
+        let Some(name) = row
+            .and_then(|row| CATEGORY_NAMES.get(row.index() as usize))
+            .copied()
+        else {
+            return;
+        };
+        stack_for_navigation.set_visible_child_name(name);
+    });
+    if let Some(first) = navigation.row_at_index(0) {
+        navigation.select_row(Some(&first));
+    }
+
+    let layout = GtkBox::new(Orientation::Horizontal, 0);
+    layout.add_css_class("settings-layout");
+    layout.set_hexpand(true);
+    layout.set_vexpand(true);
+    layout.append(&sidebar);
+    layout.append(&content_stack);
+    page.append(&layout);
 
     SettingsWidgets {
         page,
         done,
+        navigation,
         file_switch,
         clipboard_switch,
         web_switch,
@@ -2055,15 +2307,338 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
         retention_days,
         theme,
         language: language_dropdown,
+        quick_links_switch: quick_links_widgets.enabled,
+        quick_links_list: quick_links_widgets.list,
+        quick_link_add: quick_links_widgets.add,
+        quick_link_edit: quick_links_widgets.edit,
+        quick_link_delete: quick_links_widgets.delete,
+        quick_link_editor_stack: quick_links_widgets.editor_stack,
+        quick_link_editor_title: quick_links_widgets.editor_title,
+        quick_link_id: quick_links_widgets.id,
+        quick_link_name: quick_links_widgets.name,
+        quick_link_keywords: quick_links_widgets.keywords,
+        quick_link_template: quick_links_widgets.template,
+        quick_link_editor_hint: quick_links_widgets.editor_hint,
+        quick_link_save: quick_links_widgets.save,
+        quick_link_cancel: quick_links_widgets.cancel,
+        quick_link_editing_id: quick_links_widgets.editing_id,
+        quick_links_status: quick_links_widgets.status,
+        quick_links: quick_links_widgets.links,
         status,
     }
 }
 
-fn settings_section_title(text: &str) -> Label {
-    let label = Label::new(Some(text));
-    label.add_css_class("settings-section-title");
+fn settings_category_page<W: IsA<gtk::Widget>>(
+    title: &str,
+    description: &str,
+    content: &W,
+    scroll_content: bool,
+) -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 0);
+    page.add_css_class("settings-content-page");
+    page.set_hexpand(true);
+    page.set_vexpand(true);
+
+    let title = Label::new(Some(title));
+    title.add_css_class("settings-content-title");
+    title.set_xalign(0.0);
+    page.append(&title);
+    let description = Label::new(Some(description));
+    description.add_css_class("settings-content-description");
+    description.set_xalign(0.0);
+    description.set_wrap(true);
+    page.append(&description);
+
+    content.set_hexpand(true);
+    if scroll_content {
+        let scroller = ScrolledWindow::builder()
+            .child(content)
+            .vexpand(true)
+            .hexpand(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .propagate_natural_height(false)
+            .propagate_natural_width(false)
+            .build();
+        scroller.add_css_class("settings-content-scroller");
+        page.append(&scroller);
+    } else {
+        content.set_vexpand(true);
+        page.append(content);
+    }
+    page
+}
+
+fn settings_navigation_row(
+    title: &str,
+    bundled_name: &str,
+    fallback_icon: &'static str,
+) -> ListBoxRow {
+    let row = ListBoxRow::new();
+    row.add_css_class("settings-navigation-row");
+    let content = GtkBox::new(Orientation::Horizontal, 10);
+    content.set_margin_start(10);
+    content.set_margin_end(10);
+    content.set_margin_top(7);
+    content.set_margin_bottom(7);
+    let icon =
+        bundled_icon(bundled_name).unwrap_or_else(|| themed_icon(&[fallback_icon], fallback_icon));
+    icon.add_css_class("settings-navigation-icon");
+    icon.set_pixel_size(18);
+    icon.set_size_request(22, 22);
+    content.append(&icon);
+    let label = Label::new(Some(title));
+    label.add_css_class("settings-navigation-title");
     label.set_xalign(0.0);
-    label
+    label.set_hexpand(true);
+    content.append(&label);
+    row.set_child(Some(&content));
+    row
+}
+
+/// Build the Quick Links editor shown in its own Settings category.  The actual
+/// values are kept in an Rc so add/edit/delete callbacks and the list renderer
+/// always operate on the same snapshot.  Each mutation is written atomically
+/// to `~/.config/alter/quick-links.json`.
+fn build_quick_links_group(language: Language, enabled: bool) -> QuickLinksWidgets {
+    let report = quick_links::load_report();
+    let load_error = report.errors.first().cloned();
+    let links = Rc::new(RefCell::new(
+        QuickLinkCatalog::new(report.links).links().to_vec(),
+    ));
+    let group = GtkBox::new(Orientation::Vertical, 8);
+    group.add_css_class("settings-group");
+    group.add_css_class("quick-links-group");
+    group.set_vexpand(true);
+
+    let (switch_row, switch) = switch_setting_row(
+        language.text("启用快速链接", "Enable quick links"),
+        language.text(
+            "使用关键词和 URL 模板快速跳转，例如 cj j-056rekk80h",
+            "Open URL templates with a keyword, for example cj j-056rekk80h",
+        ),
+        enabled,
+    );
+    group.append(&switch_row);
+
+    let list_page = GtkBox::new(Orientation::Vertical, 8);
+    list_page.add_css_class("quick-links-editor-box");
+    list_page.set_vexpand(true);
+
+    let list = ListBox::new();
+    list.set_selection_mode(SelectionMode::Single);
+    list.set_activate_on_single_click(false);
+    list.add_css_class("quick-links-list");
+    list.set_vexpand(true);
+    let scroller = ScrolledWindow::builder()
+        .child(&list)
+        .vexpand(true)
+        .hexpand(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .build();
+    scroller.add_css_class("quick-links-scroller");
+    list_page.append(&scroller);
+
+    let controls = GtkBox::new(Orientation::Horizontal, 8);
+    controls.set_halign(Align::End);
+    let add = Button::with_label(language.text("新增", "Add"));
+    let edit = Button::with_label(language.text("编辑", "Edit"));
+    let delete = Button::with_label(language.text("删除", "Delete"));
+    add.add_css_class("quick-link-button");
+    edit.add_css_class("quick-link-button");
+    delete.add_css_class("quick-link-button");
+    controls.append(&add);
+    controls.append(&edit);
+    controls.append(&delete);
+    list_page.append(&controls);
+
+    let status = Label::new(Some(language.text(
+        "没有配置快速链接；点击“新增”开始。",
+        "No quick links configured; click Add to create one.",
+    )));
+    status.add_css_class("quick-links-status");
+    status.set_xalign(0.0);
+    status.set_wrap(true);
+    list_page.append(&status);
+
+    let form = GtkBox::new(Orientation::Vertical, 10);
+    form.add_css_class("quick-link-inline-editor");
+    form.set_vexpand(true);
+    let form_header = GtkBox::new(Orientation::Horizontal, 10);
+    let form_back = themed_icon(&["go-previous-symbolic"], "go-previous-symbolic");
+    form_back.set_pixel_size(18);
+    form_header.append(&form_back);
+    let editor_title = Label::new(Some(language.text("新增快速链接", "Add Quick Link")));
+    editor_title.add_css_class("quick-link-editor-title");
+    editor_title.set_xalign(0.0);
+    form_header.append(&editor_title);
+    form.append(&form_header);
+
+    let id = Entry::new();
+    id.set_placeholder_text(Some("job-details"));
+    let name = Entry::new();
+    name.set_placeholder_text(Some(language.text("工单详情", "Job details")));
+    let keywords = Entry::new();
+    keywords.set_placeholder_text(Some("job, ticket"));
+    let template = Entry::new();
+    template.set_placeholder_text(Some("https://example.test/item/{query}"));
+    for (label, entry) in [
+        (language.text("ID（可选）", "ID (optional)"), &id),
+        (language.text("名称", "Name"), &name),
+        (
+            language.text("关键词 / 别名", "Keywords / aliases"),
+            &keywords,
+        ),
+        (
+            language.text(
+                "URL 模板（必须包含 {query}）",
+                "URL template (must contain {query})",
+            ),
+            &template,
+        ),
+    ] {
+        let field = GtkBox::new(Orientation::Vertical, 5);
+        let label = Label::new(Some(label));
+        label.add_css_class("quick-link-field-label");
+        label.set_xalign(0.0);
+        field.append(&label);
+        entry.set_hexpand(true);
+        field.append(entry);
+        form.append(&field);
+    }
+    let editor_hint = Label::new(Some(language.text(
+        "输入例：cj j-056rekk80h → 将参数填入 URL 并打开浏览器。",
+        "Example: cj j-056rekk80h → fills the parameter and opens the browser.",
+    )));
+    editor_hint.add_css_class("quick-link-editor-hint");
+    editor_hint.set_xalign(0.0);
+    editor_hint.set_wrap(true);
+    form.append(&editor_hint);
+    let form_buttons = GtkBox::new(Orientation::Horizontal, 8);
+    form_buttons.set_halign(Align::End);
+    form_buttons.set_valign(Align::End);
+    form_buttons.set_vexpand(true);
+    let cancel = Button::with_label(language.text("取消", "Cancel"));
+    let save = Button::with_label(language.text("保存", "Save"));
+    cancel.add_css_class("quick-link-button");
+    save.add_css_class("quick-link-save-button");
+    form_buttons.append(&cancel);
+    form_buttons.append(&save);
+    form.append(&form_buttons);
+
+    let editor_stack = Stack::new();
+    editor_stack.add_css_class("quick-link-editor-stack");
+    editor_stack.set_vexpand(true);
+    editor_stack.set_vhomogeneous(false);
+    editor_stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+    editor_stack.set_transition_duration(160);
+    editor_stack.add_named(&list_page, Some("list"));
+    editor_stack.add_named(&form, Some("form"));
+    editor_stack.set_visible_child_name("list");
+    editor_stack.set_sensitive(enabled);
+    group.append(&editor_stack);
+
+    let editor_for_switch = editor_stack.clone();
+    switch.connect_active_notify(move |switch| {
+        editor_for_switch.set_sensitive(switch.is_active());
+    });
+
+    let editing_id = Rc::new(RefCell::new(None));
+
+    render_quick_links_list(&list, &links.borrow(), language);
+    update_quick_links_status(
+        &status,
+        links.borrow().len(),
+        language,
+        load_error.as_deref(),
+    );
+
+    QuickLinksWidgets {
+        group,
+        enabled: switch,
+        list,
+        add,
+        edit,
+        delete,
+        editor_stack,
+        editor_title,
+        id,
+        name,
+        keywords,
+        template,
+        editor_hint,
+        save,
+        cancel,
+        editing_id,
+        status,
+        links,
+    }
+}
+
+fn render_quick_links_list(list: &ListBox, links: &[QuickLink], language: Language) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    for link in links {
+        let row = ListBoxRow::new();
+        row.add_css_class("quick-link-setting-row");
+        let labels = GtkBox::new(Orientation::Vertical, 2);
+        labels.set_margin_top(7);
+        labels.set_margin_bottom(7);
+        labels.set_margin_start(12);
+        labels.set_margin_end(12);
+        let title = Label::new(Some(&link.name));
+        title.add_css_class("quick-link-title");
+        title.set_xalign(0.0);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        labels.append(&title);
+        let subtitle_text = if language == Language::Chinese {
+            format!(
+                "关键词：{}  ·  {}",
+                link.keywords.join(", "),
+                link.url_template
+            )
+        } else {
+            format!(
+                "Keywords: {}  ·  {}",
+                link.keywords.join(", "),
+                link.url_template
+            )
+        };
+        let subtitle = Label::new(Some(&subtitle_text));
+        subtitle.add_css_class("quick-link-subtitle");
+        subtitle.set_xalign(0.0);
+        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        labels.append(&subtitle);
+        row.set_child(Some(&labels));
+        list.append(&row);
+    }
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+    }
+}
+
+fn update_quick_links_status(
+    status: &Label,
+    count: usize,
+    language: Language,
+    message: Option<&str>,
+) {
+    if let Some(message) = message {
+        status.set_text(message);
+    } else if count == 0 {
+        status.set_text(language.text(
+            "没有配置快速链接；点击“新增”开始。",
+            "No quick links configured; click Add to create one.",
+        ));
+    } else if language == Language::Chinese {
+        status.set_text(&format!("已配置 {count} 条快速链接 · 修改后立即生效"));
+    } else {
+        status.set_text(&format!(
+            "{count} quick link(s) configured · changes apply immediately"
+        ));
+    }
 }
 
 fn switch_setting_row(title: &str, description: &str, active: bool) -> (GtkBox, Switch) {
@@ -2122,6 +2697,214 @@ fn wire_settings(
     refresh: &Rc<dyn Fn()>,
     language: Language,
 ) {
+    {
+        let preferences = preferences.clone();
+        let status = widgets.status.clone();
+        let refresh = refresh.clone();
+        widgets
+            .quick_links_switch
+            .connect_active_notify(move |switch| {
+                save_setting(&preferences, &status, language, |settings| {
+                    settings.quick_links = switch.is_active();
+                });
+                refresh();
+            });
+    }
+    {
+        let editor_stack = widgets.quick_link_editor_stack.clone();
+        let editor_title = widgets.quick_link_editor_title.clone();
+        let id = widgets.quick_link_id.clone();
+        let name = widgets.quick_link_name.clone();
+        let keywords = widgets.quick_link_keywords.clone();
+        let template = widgets.quick_link_template.clone();
+        let hint = widgets.quick_link_editor_hint.clone();
+        let editing_id = widgets.quick_link_editing_id.clone();
+        widgets.quick_link_add.connect_clicked(move |_| {
+            *editing_id.borrow_mut() = None;
+            id.set_text("");
+            name.set_text("");
+            keywords.set_text("");
+            template.set_text("");
+            editor_title.set_text(language.text("新增快速链接", "Add Quick Link"));
+            hint.set_text(language.text(
+                "输入例：cj j-056rekk80h → 将参数填入 URL 并打开浏览器。",
+                "Example: cj j-056rekk80h → fills the parameter and opens the browser.",
+            ));
+            editor_stack.set_visible_child_name("form");
+            name.grab_focus();
+        });
+    }
+    {
+        let links = widgets.quick_links.clone();
+        let list = widgets.quick_links_list.clone();
+        let status = widgets.quick_links_status.clone();
+        let editor_stack = widgets.quick_link_editor_stack.clone();
+        let editor_title = widgets.quick_link_editor_title.clone();
+        let id = widgets.quick_link_id.clone();
+        let name = widgets.quick_link_name.clone();
+        let keywords = widgets.quick_link_keywords.clone();
+        let template = widgets.quick_link_template.clone();
+        let hint = widgets.quick_link_editor_hint.clone();
+        let editing_id = widgets.quick_link_editing_id.clone();
+        widgets.quick_link_edit.connect_clicked(move |_| {
+            let Some(index) = list.selected_row().map(|row| row.index() as usize) else {
+                update_quick_links_status(
+                    &status,
+                    links.borrow().len(),
+                    language,
+                    Some(language.text("请先选择一条链接", "Select a link first")),
+                );
+                return;
+            };
+            let Some(existing) = links.borrow().get(index).cloned() else {
+                return;
+            };
+            *editing_id.borrow_mut() = Some(existing.id.clone());
+            id.set_text(&existing.id);
+            name.set_text(&existing.name);
+            keywords.set_text(&existing.keywords.join(", "));
+            template.set_text(&existing.url_template);
+            editor_title.set_text(language.text("编辑快速链接", "Edit Quick Link"));
+            hint.set_text(language.text(
+                "修改后立即生效；URL 模板必须包含 {query}。",
+                "Changes apply immediately; the URL template must contain {query}.",
+            ));
+            editor_stack.set_visible_child_name("form");
+            name.grab_focus();
+        });
+    }
+    {
+        let edit = widgets.quick_link_edit.clone();
+        widgets
+            .quick_links_list
+            .connect_row_activated(move |_, _| edit.emit_clicked());
+    }
+    {
+        let editor_stack = widgets.quick_link_editor_stack.clone();
+        let editing_id = widgets.quick_link_editing_id.clone();
+        let list = widgets.quick_links_list.clone();
+        widgets.quick_link_cancel.connect_clicked(move |_| {
+            *editing_id.borrow_mut() = None;
+            editor_stack.set_visible_child_name("list");
+            focus_list_selection(&list);
+        });
+    }
+    {
+        let links = widgets.quick_links.clone();
+        let list = widgets.quick_links_list.clone();
+        let status = widgets.quick_links_status.clone();
+        let editor_stack = widgets.quick_link_editor_stack.clone();
+        let id = widgets.quick_link_id.clone();
+        let name = widgets.quick_link_name.clone();
+        let keywords = widgets.quick_link_keywords.clone();
+        let template = widgets.quick_link_template.clone();
+        let hint = widgets.quick_link_editor_hint.clone();
+        let editing_id = widgets.quick_link_editing_id.clone();
+        let refresh = refresh.clone();
+        widgets.quick_link_save.connect_clicked(move |_| {
+            let link = match QuickLink::from_form(
+                (!id.text().trim().is_empty())
+                    .then(|| id.text().trim().to_owned())
+                    .as_deref(),
+                name.text().as_str(),
+                keywords.text().as_str(),
+                template.text().as_str(),
+            ) {
+                Ok(link) => link,
+                Err(error) => {
+                    hint.set_text(&format!(
+                        "{}: {error}",
+                        language.text("无效配置", "Invalid configuration")
+                    ));
+                    return;
+                }
+            };
+            let original_id = editing_id.borrow().clone();
+            let mut values = links.borrow_mut();
+            if values.iter().any(|value| {
+                value.id == link.id && original_id.as_deref() != Some(value.id.as_str())
+            }) {
+                hint.set_text(language.text(
+                    "保存失败：ID 已存在",
+                    "Could not save: that ID already exists",
+                ));
+                return;
+            }
+            let mut updated = values.clone();
+            if let Some(original_id) = original_id {
+                let Some(position) = updated.iter().position(|value| value.id == original_id)
+                else {
+                    hint.set_text(language.text(
+                        "链接已不存在，请取消后重试。",
+                        "The link no longer exists; cancel and try again.",
+                    ));
+                    return;
+                };
+                updated[position] = link;
+            } else {
+                updated.push(link);
+            }
+            updated.sort_by_cached_key(|value| value.name.to_lowercase());
+            match quick_links::save(&updated) {
+                Ok(()) => {
+                    *values = updated;
+                    render_quick_links_list(&list, &values, language);
+                    update_quick_links_status(&status, values.len(), language, None);
+                    *editing_id.borrow_mut() = None;
+                    editor_stack.set_visible_child_name("list");
+                    focus_list_selection(&list);
+                    refresh();
+                }
+                Err(error) => {
+                    hint.set_text(&format!(
+                        "{}: {error}",
+                        language.text("保存失败", "Save failed")
+                    ));
+                }
+            }
+        });
+    }
+    {
+        let links = widgets.quick_links.clone();
+        let list = widgets.quick_links_list.clone();
+        let status = widgets.quick_links_status.clone();
+        let refresh = refresh.clone();
+        widgets.quick_link_delete.connect_clicked(move |_| {
+            let Some(index) = list.selected_row().map(|row| row.index() as usize) else {
+                update_quick_links_status(
+                    &status,
+                    links.borrow().len(),
+                    language,
+                    Some(language.text("请先选择一条链接", "Select a link first")),
+                );
+                return;
+            };
+            let mut values = links.borrow_mut();
+            if index >= values.len() {
+                return;
+            }
+            let removed = values.remove(index);
+            match quick_links::save(&values) {
+                Ok(()) => {
+                    render_quick_links_list(&list, &values, language);
+                    update_quick_links_status(&status, values.len(), language, None);
+                    refresh();
+                }
+                Err(error) => {
+                    values.insert(index, removed);
+                    update_quick_links_status(
+                        &status,
+                        values.len(),
+                        language,
+                        Some(&format!(
+                            "{}: {error}",
+                            language.text("删除失败", "Delete failed")
+                        )),
+                    );
+                }
+            }
+        });
+    }
     {
         let preferences = preferences.clone();
         let status = widgets.status.clone();

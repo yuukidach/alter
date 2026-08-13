@@ -5,6 +5,7 @@ pub mod clipboard_meta;
 mod desktop;
 mod i18n;
 mod paths;
+mod quick_links;
 mod search;
 mod settings;
 pub mod snippets;
@@ -96,7 +97,7 @@ fn main() -> glib::ExitCode {
         .iter()
         .any(|argument| argument == "--version" || argument == "-V")
     {
-        println!("alter 0.1.1");
+        println!("alter {}", env!("CARGO_PKG_VERSION"));
         return glib::ExitCode::SUCCESS;
     }
     if arguments
@@ -302,6 +303,7 @@ Web:
   ddg <query>  DuckDuckGo search
 
 Extensions:
+  ~/.config/alter/quick-links.json Keyword + URL template shortcuts
   ~/.config/alter/workflows/*.json  Workflow manifests
   script_filter=true                Alfred-style JSON/TSV workflow results
   actions=[...]                     Named Workflow actions shown with Tab

@@ -1,7 +1,8 @@
 use crate::calculator;
 use crate::clipboard::{self, ClipboardItem};
 use crate::desktop::AppItem;
-use crate::settings::{self, SharedSettings};
+use crate::quick_links::{QuickLinkAction, QuickLinkCatalog};
+use crate::settings::{self, Settings, SharedSettings};
 use crate::snippets::{SnippetCatalog, SnippetMatch};
 use crate::web::{WebSearchAction, WebSearchEngine};
 use crate::workflow::{WorkflowCatalog, WorkflowMatch, WorkflowResultItem};
@@ -21,6 +22,7 @@ pub enum ResultKind {
     Web,
     Workflow,
     Snippet,
+    QuickLink,
 }
 
 #[derive(Clone, Debug)]
@@ -34,6 +36,7 @@ pub enum ResultPayload {
     Snippet {
         content: String,
     },
+    QuickLink(QuickLinkAction),
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +274,46 @@ impl SearchResult {
             matched.score,
         ))
     }
+
+    pub fn quick_link(action: QuickLinkAction, score: i64) -> ScoredResult {
+        let title = format!("{} · {}", action.name, action.query);
+        ScoredResult {
+            score,
+            result: Self {
+                kind: ResultKind::QuickLink,
+                title,
+                subtitle: "快速链接 · 在默认浏览器中打开".to_owned(),
+                target: PathBuf::new(),
+                icon: Some("insert-link".to_owned()),
+                clipboard_id: None,
+                clipboard_content: None,
+                clipboard_path: None,
+                clipboard_pinned: false,
+                payload: Some(ResultPayload::QuickLink(action)),
+            },
+        }
+    }
+
+    pub fn quick_link_prompt(
+        prompt: crate::quick_links::QuickLinkPrompt,
+        score: i64,
+    ) -> ScoredResult {
+        ScoredResult {
+            score,
+            result: Self {
+                kind: ResultKind::QuickLink,
+                title: format!("{} · 输入参数", prompt.name),
+                subtitle: format!("快速链接 · {} <参数>", prompt.keyword),
+                target: PathBuf::from(prompt.link_id),
+                icon: Some("insert-link".to_owned()),
+                clipboard_id: None,
+                clipboard_content: None,
+                clipboard_path: None,
+                clipboard_pinned: false,
+                payload: None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +383,19 @@ impl SearchEngine {
                     &self.database,
                 );
             }
+        }
+        // Quick links are explicit keyword actions. They are intentionally
+        // excluded from ordinary fuzzy search and are reloaded so edits to
+        // the user config take effect without restarting the daemon.
+        if matches!(scope, Scope::All)
+            && let Some(results) = quick_link_results(
+                raw_query,
+                &QuickLinkCatalog::load(),
+                &preferences,
+                &self.database,
+            )
+        {
+            return results;
         }
         if preferences.workflow_search && !query.is_empty() {
             for matched in self.workflows.search(raw_query).into_iter().take(8) {
@@ -488,20 +544,52 @@ impl SearchEngine {
             }
         }
 
-        scored.sort_by(|left, right| {
-            right.score.cmp(&left.score).then_with(|| {
-                kind_priority(&right.result.kind).cmp(&kind_priority(&left.result.kind))
-            })
-        });
         if query.is_empty() && !preferences.show_recent {
             return Vec::new();
         }
-        scored
-            .into_iter()
-            .take(preferences.max_results)
-            .map(|item| item.result)
-            .collect()
+        finish_results(scored, preferences.max_results)
     }
+}
+
+fn finish_results(mut scored: Vec<ScoredResult>, limit: usize) -> Vec<SearchResult> {
+    scored.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| kind_priority(&right.result.kind).cmp(&kind_priority(&left.result.kind)))
+    });
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|item| item.result)
+        .collect()
+}
+
+fn quick_link_results(
+    raw_query: &str,
+    catalog: &QuickLinkCatalog,
+    preferences: &Settings,
+    database: &Path,
+) -> Option<Vec<SearchResult>> {
+    if !preferences.quick_links || raw_query.trim().is_empty() || !catalog.has_keyword(raw_query) {
+        return None;
+    }
+
+    let matches = catalog.matching(raw_query);
+    let mut scored = Vec::new();
+    for matched in matches.iter().take(8) {
+        let key = format!("quick-link:{}", matched.link.id);
+        let score = matched.score + ranking_bonus(preferences.learning_ranking, database, &key);
+        scored.push(SearchResult::quick_link(matched.action.clone(), score));
+    }
+    if matches.is_empty()
+        && let Some(prompt) = catalog.prompt_for_keyword(raw_query)
+    {
+        let key = format!("quick-link:{}", prompt.link_id);
+        let score = 2_200 + ranking_bonus(preferences.learning_ranking, database, &key);
+        scored.push(SearchResult::quick_link_prompt(prompt, score));
+    }
+    Some(finish_results(scored, preferences.max_results))
 }
 
 fn append_web_suggestions(
@@ -565,6 +653,7 @@ fn kind_priority(kind: &ResultKind) -> u8 {
         ResultKind::Calculation => 5,
         ResultKind::Settings => 4,
         ResultKind::Snippet => 4,
+        ResultKind::QuickLink => 9,
         ResultKind::App => 3,
         ResultKind::File => 2,
         ResultKind::Clipboard => 1,
@@ -744,6 +833,7 @@ fn age(timestamp: i64) -> String {
 mod tests {
     use super::*;
     use crate::desktop::AppItem;
+    use crate::quick_links::QuickLink;
     use crate::settings::{Settings, shared};
     use crate::snippets::{Snippet, SnippetCatalog};
     use crate::workflow::{Workflow, WorkflowCatalog};
@@ -906,6 +996,49 @@ mod tests {
                 .any(|result| result.kind == ResultKind::Snippet)
         );
         remove_database(&database);
+    }
+
+    #[test]
+    fn quick_links_only_claim_explicit_keyword_queries() {
+        let link = QuickLink::from_form(
+            Some("job-details"),
+            "Job details",
+            "job",
+            "https://example.test/jobs/{query}",
+        )
+        .unwrap();
+        let catalog = QuickLinkCatalog::new(vec![link]);
+
+        let matched = catalog.matching("job j-056rekk80h");
+        assert_eq!(matched.len(), 1);
+        assert_eq!(
+            matched[0].action.url,
+            "https://example.test/jobs/j-056rekk80h"
+        );
+        assert!(catalog.matching("j-056rekk80h").is_empty());
+        assert!(catalog.matching("jobs j-056rekk80h").is_empty());
+
+        let preferences = local_settings(false);
+        let results =
+            quick_link_results("job j-056rekk80h", &catalog, &preferences, Path::new("")).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, ResultKind::QuickLink);
+        assert!(matches!(
+            results[0].payload,
+            Some(ResultPayload::QuickLink(_))
+        ));
+
+        let prompt = quick_link_results("job", &catalog, &preferences, Path::new("")).unwrap();
+        assert_eq!(prompt.len(), 1);
+        assert_eq!(prompt[0].kind, ResultKind::QuickLink);
+        assert!(prompt[0].payload.is_none());
+
+        let mut disabled = preferences.clone();
+        disabled.quick_links = false;
+        assert!(quick_link_results("job value", &catalog, &disabled, Path::new("")).is_none());
+        assert!(
+            quick_link_results("ordinary search", &catalog, &preferences, Path::new("")).is_none()
+        );
     }
 
     #[test]
