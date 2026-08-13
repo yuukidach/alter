@@ -45,12 +45,13 @@ struct DesktopEntry {
 }
 
 pub fn load_applications() -> Vec<AppItem> {
-    let mut roots = application_roots();
+    load_applications_from_roots(application_roots())
+}
+
+fn load_applications_from_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<AppItem> {
     // Local entries are visited first.  A local Hidden=true entry must mask a
     // system entry with the same desktop id, so we mark ids as seen before
     // parsing each file.
-    roots.reverse();
-
     let mut seen = HashSet::new();
     let mut apps = HashMap::<String, AppItem>::new();
 
@@ -259,5 +260,38 @@ mod tests {
         assert_eq!(app.name, "Test App");
         assert_eq!(app.icon.as_deref(), Some("test-icon"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn user_desktop_entry_overrides_system_entry_with_same_id() {
+        let test_root = std::env::temp_dir().join(format!(
+            "alter-desktop-priority-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let user_root = test_root.join("user");
+        let system_root = test_root.join("system");
+        fs::create_dir_all(&user_root).unwrap();
+        fs::create_dir_all(&system_root).unwrap();
+        fs::write(
+            user_root.join("example.desktop"),
+            "[Desktop Entry]\nType=Application\nName=User Entry\nExec=user-command\n",
+        )
+        .unwrap();
+        fs::write(
+            system_root.join("example.desktop"),
+            "[Desktop Entry]\nType=Application\nName=System Entry\nExec=system-command\n",
+        )
+        .unwrap();
+
+        let apps = load_applications_from_roots([user_root.clone(), system_root]);
+
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name, "User Entry");
+        assert_eq!(apps[0].desktop_file, user_root.join("example.desktop"));
+        let _ = fs::remove_dir_all(test_root);
     }
 }
