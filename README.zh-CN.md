@@ -1,8 +1,8 @@
 # Alter
 
-Alter 是面向 **Hyprland + Wayland** 的快速启动器，提供应用和文件搜索、剪贴板历史、网页搜索，以及 Quick Links、Workflow、Snippet 等扩展，全部集中在一个 GTK4 浮层中。
+[![English README](https://img.shields.io/badge/English-README-blue)](README.md) [![许可证](https://img.shields.io/github/license/yuukidach/alter)](LICENSE)
 
-[![English README](https://img.shields.io/badge/English-README-blue)](README.md)
+Alter 是面向 **Hyprland + Wayland** 的快速启动器，提供应用和文件搜索、剪贴板历史、网页搜索，以及 Quick Links、Workflow、Snippet 等扩展，全部集中在一个 GTK4 浮层中。
 
 ![Alter 搜索界面](screenshots/alter-search.png)
 

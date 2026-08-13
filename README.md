@@ -1,8 +1,8 @@
 # Alter
 
-Alter is a fast, keyboard-first launcher for **Hyprland + Wayland**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 overlay.
+[![AUR version](https://img.shields.io/aur/version/alter-launcher?label=AUR)](https://aur.archlinux.org/packages/alter-launcher) [![GitHub release](https://img.shields.io/github/v/release/yuukidach/alter?display_name=tag)](https://github.com/yuukidach/alter/releases) [![License](https://img.shields.io/github/license/yuukidach/alter)](LICENSE) [![简体中文](https://img.shields.io/badge/简体中文-README.zh--CN-blue)](README.zh-CN.md)
 
-**English is the primary README.** [![简体中文](https://img.shields.io/badge/简体中文-README.zh--CN-blue)](README.zh-CN.md)
+Alter is a fast, keyboard-first launcher for **Hyprland + Wayland**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 overlay.
 
 ![Alter search interface](screenshots/alter-search.png)
 
