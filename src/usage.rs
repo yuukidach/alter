@@ -7,6 +7,7 @@
 //! and can add [`score_bonus`] to their normal fuzzy-match score.
 
 use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,6 +31,10 @@ pub struct UsageItem {
 /// clipboard watcher is running.  SQLite's busy timeout gives a concurrent
 /// clipboard write a short opportunity to finish.
 pub fn ensure_schema(path: &Path) -> rusqlite::Result<()> {
+    open_with_schema(path).map(|_| ())
+}
+
+fn open_with_schema(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -52,7 +57,7 @@ pub fn ensure_schema(path: &Path) -> rusqlite::Result<()> {
             ON usage_stats(kind, last_used_at DESC, use_count DESC);
         ",
     )?;
-    Ok(())
+    Ok(connection)
 }
 
 /// Record one explicit selection of an item.
@@ -62,8 +67,7 @@ pub fn ensure_schema(path: &Path) -> rusqlite::Result<()> {
 /// involved; one SQLite upsert is used so concurrent launcher invocations do
 /// not lose increments.
 pub fn record_use(path: &Path, key: &str, title: &str, kind: &str) -> rusqlite::Result<()> {
-    ensure_schema(path)?;
-    let connection = open(path)?;
+    let connection = open_with_schema(path)?;
     connection.execute(
         "INSERT INTO usage_stats(\"key\", title, kind, use_count, last_used_at)
          VALUES (?1, ?2, ?3, 1, ?4)
@@ -84,8 +88,7 @@ pub fn record_use(path: &Path, key: &str, title: &str, kind: &str) -> rusqlite::
 /// thirty days).  Missing keys simply receive zero, which lets callers use
 /// `score_bonus(...).unwrap_or_default()` while a database is unavailable.
 pub fn score_bonus(path: &Path, key: &str) -> rusqlite::Result<i64> {
-    ensure_schema(path)?;
-    let connection = open(path)?;
+    let connection = open_with_schema(path)?;
     let values = connection
         .query_row(
             "SELECT use_count, last_used_at FROM usage_stats WHERE \"key\" = ?1",
@@ -96,6 +99,35 @@ pub fn score_bonus(path: &Path, key: &str) -> rusqlite::Result<i64> {
     Ok(values
         .map(|(use_count, last_used_at)| score_bonus_from_values(use_count, last_used_at, now()))
         .unwrap_or_default())
+}
+
+/// Load every persisted ranking bonus with one database connection/query.
+///
+/// Search evaluates many candidates at once. Calling [`score_bonus`] for each
+/// candidate would repeatedly open SQLite and prepare the same statement,
+/// which makes a single keystroke noticeably expensive on larger app/file
+/// catalogs. This snapshot keeps that work constant per search while retaining
+/// the exact same scoring rules.
+pub fn score_bonuses(path: &Path) -> rusqlite::Result<HashMap<String, i64>> {
+    let connection = open_with_schema(path)?;
+    let at = now();
+    let mut statement = connection.prepare(
+        "SELECT \"key\", use_count, last_used_at
+         FROM usage_stats",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    let mut bonuses = HashMap::new();
+    for row in rows {
+        let (key, use_count, last_used_at) = row?;
+        bonuses.insert(key, score_bonus_from_values(use_count, last_used_at, at));
+    }
+    Ok(bonuses)
 }
 
 /// Return all recently used items, newest first.
@@ -117,8 +149,7 @@ fn recent_items_filtered(
     kind: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<Vec<UsageItem>> {
-    ensure_schema(path)?;
-    let connection = open(path)?;
+    let connection = open_with_schema(path)?;
     let limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let mut items = Vec::new();
     if let Some(kind) = kind {
@@ -248,6 +279,21 @@ mod tests {
         let second = score_bonus(&path, "app:one").unwrap();
         assert!(first > 0);
         assert!(second > first);
+        remove_database(&path);
+    }
+
+    #[test]
+    fn bulk_score_snapshot_matches_individual_lookups() {
+        let path = temporary_database("bulk-score");
+        record_use(&path, "app:one", "One", "app").unwrap();
+        record_use(&path, "app:one", "One", "app").unwrap();
+        record_use(&path, "file:two", "Two", "file").unwrap();
+
+        let bonuses = score_bonuses(&path).unwrap();
+        assert_eq!(bonuses.len(), 2);
+        assert_eq!(bonuses["app:one"], score_bonus(&path, "app:one").unwrap());
+        assert_eq!(bonuses["file:two"], score_bonus(&path, "file:two").unwrap());
+        assert!(!bonuses.contains_key("missing"));
         remove_database(&path);
     }
 

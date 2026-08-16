@@ -16,11 +16,15 @@ use gtk::{
     SelectionMode, SpinButton, Stack, Switch, TextView, WrapMode,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+    mpsc,
+};
 use std::time::Duration;
 
 struct SearchMessage {
@@ -345,7 +349,7 @@ pub fn build(
 
     let results = Rc::new(RefCell::new(Vec::<SearchResult>::new()));
     let action_context = Rc::new(RefCell::new(None::<ActionContext>));
-    let generation = Rc::new(Cell::new(0u64));
+    let generation = Arc::new(AtomicU64::new(0));
     let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
     let (sender, receiver) = mpsc::channel::<SearchMessage>();
     let receiver = Rc::new(RefCell::new(receiver));
@@ -445,13 +449,17 @@ pub fn build(
         let status = status.clone();
         let preview = preview.clone();
         glib::timeout_add_local(Duration::from_millis(45), move || {
+            let current_generation = generation.load(Ordering::Relaxed);
             let mut newest = None;
             while let Ok(message) = receiver.borrow().try_recv() {
-                newest = Some(message);
+                // A completed network request from an older query may arrive
+                // after the current query's fast result. Ignore it without
+                // accidentally discarding the newer message in the channel.
+                if message.generation == current_generation {
+                    newest = Some(message);
+                }
             }
-            if let Some(message) = newest
-                && message.generation == generation.get()
-            {
+            if let Some(message) = newest {
                 render_results(
                     &list,
                     &scroller,
@@ -707,11 +715,10 @@ fn request_search(
     query: String,
     sender: mpsc::Sender<SearchMessage>,
     engine: SearchEngine,
-    generation: Rc<Cell<u64>>,
+    generation: Arc<AtomicU64>,
     pending: Rc<RefCell<Option<glib::SourceId>>>,
 ) {
-    let next_generation = generation.get().wrapping_add(1);
-    generation.set(next_generation);
+    let next_generation = generation.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     if let Some(source) = pending.borrow_mut().take() {
         source.remove();
     }
@@ -719,12 +726,38 @@ fn request_search(
     let pending_for_callback = pending.clone();
     let source = glib::timeout_add_local_once(Duration::from_millis(70), move || {
         pending_for_callback.borrow_mut().take();
+        let generation = generation.clone();
         std::thread::spawn(move || {
             let results = engine.search(&query);
-            let _ = sender.send(SearchMessage {
-                generation: next_generation,
-                results,
-            });
+            if generation.load(Ordering::Relaxed) != next_generation {
+                return;
+            }
+            if sender
+                .send(SearchMessage {
+                    generation: next_generation,
+                    results,
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            // Suggestions are optional enrichment. Waiting for a short quiet
+            // period prevents one curl process per keystroke, while the main
+            // web action above has already reached the UI.
+            std::thread::sleep(Duration::from_millis(180));
+            if generation.load(Ordering::Relaxed) != next_generation {
+                return;
+            }
+            let Some(results) = engine.search_web_suggestions(&query) else {
+                return;
+            };
+            if generation.load(Ordering::Relaxed) == next_generation {
+                let _ = sender.send(SearchMessage {
+                    generation: next_generation,
+                    results,
+                });
+            }
         });
     });
     *pending.borrow_mut() = Some(source);

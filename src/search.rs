@@ -6,7 +6,7 @@ use crate::settings::{self, Settings, SharedSettings};
 use crate::snippets::{SnippetCatalog, SnippetMatch};
 use crate::web::{WebSearchAction, WebSearchEngine};
 use crate::workflow::{WorkflowCatalog, WorkflowMatch, WorkflowResultItem};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -355,52 +355,40 @@ impl SearchEngine {
         let (scope, query) = parse_scope(raw_query);
         let query = query.trim();
         let preferences = settings::snapshot(&self.settings);
+        let ranking_bonuses = ranking_bonuses(preferences.learning_ranking, &self.database);
         let mut scored = Vec::new();
 
-        // Alfred-style keyword searches are represented as explicit actions.
-        // Web search is an opt-out feature: when disabled, even an explicit
-        // `? query`/`g query` input remains a normal local search.
-        if preferences.web_search
-            && let Some(action) = self.web.action_for_input(raw_query)
-        {
-            let key = format!("web:{}:{}", action.provider_id, action.query);
-            let score = WEB_PRIMARY_SCORE
-                + ranking_bonus(preferences.learning_ranking, &self.database, &key);
-            scored.push(SearchResult::web(action.clone(), score));
-
-            if preferences.web_suggestions {
-                let suggestions = self.web.suggestions_for(
-                    &action.provider_id,
-                    &action.query,
-                    MAX_WEB_SUGGESTIONS,
-                );
-                append_web_suggestions(
-                    &mut scored,
-                    &self.web,
-                    &action,
-                    suggestions,
-                    preferences.learning_ranking,
-                    &self.database,
-                );
-            }
-        }
-        // Quick links are explicit keyword actions. They are intentionally
-        // excluded from ordinary fuzzy search and are reloaded so edits to
-        // the user config take effect without restarting the daemon.
+        // Quick links intentionally take precedence over built-in provider
+        // keywords. Resolve them before web search so an overridden `g`/`b`
+        // keyword never starts an unnecessary network request.
         if matches!(scope, Scope::All)
             && let Some(results) = quick_link_results(
                 raw_query,
                 &QuickLinkCatalog::load(),
                 &preferences,
-                &self.database,
+                &ranking_bonuses,
             )
         {
             return results;
         }
+
+        // Alfred-style keyword searches are represented as explicit actions.
+        // Web search is an opt-out feature: when disabled, even an explicit
+        // `? query`/`g query` input remains a normal local search. Online
+        // suggestions are deliberately fetched later by the UI so the primary
+        // browser action is never held up by DNS or a slow provider.
+        if preferences.web_search
+            && let Some(action) = self.web.action_for_input(raw_query)
+        {
+            let key = format!("web:{}:{}", action.provider_id, action.query);
+            let score = WEB_PRIMARY_SCORE + ranking_bonus(&ranking_bonuses, &key);
+            scored.push(SearchResult::web(action, score));
+            return finish_results(scored, preferences.max_results);
+        }
         if preferences.workflow_search && !query.is_empty() {
             for matched in self.workflows.search(raw_query).into_iter().take(8) {
                 let key = format!("workflow:{}", matched.workflow.id);
-                let bonus = ranking_bonus(preferences.learning_ranking, &self.database, &key);
+                let bonus = ranking_bonus(&ranking_bonuses, &key);
                 if matched.workflow.script_filter && matched.invocation {
                     match matched.workflow.script_filter_results(&matched.query) {
                         Ok(items) if !items.is_empty() => {
@@ -431,8 +419,7 @@ impl SearchEngine {
                 if let Some(result) = SearchResult::snippet_match(matched) {
                     let key = format!("snippet:{}", result.result.target.display());
                     let mut result = result;
-                    result.score +=
-                        ranking_bonus(preferences.learning_ranking, &self.database, &key);
+                    result.score += ranking_bonus(&ranking_bonuses, &key);
                     scored.push(result);
                 }
             }
@@ -462,8 +449,7 @@ impl SearchEngine {
                     Some(
                         100 - rank.min(100) as i64
                             + ranking_bonus(
-                                preferences.learning_ranking,
-                                &self.database,
+                                &ranking_bonuses,
                                 &format!("app:{}", app.desktop_file.display()),
                             ),
                     )
@@ -472,8 +458,7 @@ impl SearchEngine {
                         value
                             + 100
                             + ranking_bonus(
-                                preferences.learning_ranking,
-                                &self.database,
+                                &ranking_bonuses,
                                 &format!("app:{}", app.desktop_file.display()),
                             )
                     })
@@ -496,11 +481,7 @@ impl SearchEngine {
                 let score = if query.is_empty() {
                     Some(
                         94 - rank.min(30) as i64
-                            + ranking_bonus(
-                                preferences.learning_ranking,
-                                &self.database,
-                                &format!("clip:{}", item.id),
-                            ),
+                            + ranking_bonus(&ranking_bonuses, &format!("clip:{}", item.id)),
                     )
                 } else {
                     clipboard_match_score(query, item).map(|value| {
@@ -508,11 +489,7 @@ impl SearchEngine {
                             + 75
                             + (30 - rank.min(30) as i64)
                             + item.use_count.min(10)
-                            + ranking_bonus(
-                                preferences.learning_ranking,
-                                &self.database,
-                                &format!("clip:{}", item.id),
-                            )
+                            + ranking_bonus(&ranking_bonuses, &format!("clip:{}", item.id))
                     })
                 };
                 if let Some(score) = score {
@@ -535,11 +512,7 @@ impl SearchEngine {
                     .or_else(|| fuzzy_score(query, &text))
                     .unwrap_or(0)
                     + 82
-                    + ranking_bonus(
-                        preferences.learning_ranking,
-                        &self.database,
-                        &format!("file:{text}"),
-                    );
+                    + ranking_bonus(&ranking_bonuses, &format!("file:{text}"));
                 scored.push(SearchResult::file(path, score));
             }
         }
@@ -548,6 +521,42 @@ impl SearchEngine {
             return Vec::new();
         }
         finish_results(scored, preferences.max_results)
+    }
+
+    /// Fetch and rank online suggestions for an explicit web query.
+    ///
+    /// This is intentionally separate from [`Self::search`]: callers should
+    /// first render the immediate primary action, then invoke this blocking
+    /// enrichment on a debounced worker thread and replace the result list if
+    /// suggestions arrive.
+    pub fn search_web_suggestions(&self, raw_query: &str) -> Option<Vec<SearchResult>> {
+        let preferences = settings::snapshot(&self.settings);
+        if !preferences.web_search || !preferences.web_suggestions {
+            return None;
+        }
+        let action = self.web.action_for_input(raw_query)?;
+        if preferences.quick_links && QuickLinkCatalog::load().has_keyword(raw_query) {
+            return None;
+        }
+        let suggestions =
+            self.web
+                .suggestions_for(&action.provider_id, &action.query, MAX_WEB_SUGGESTIONS);
+        if suggestions.is_empty() {
+            return None;
+        }
+
+        let ranking_bonuses = ranking_bonuses(preferences.learning_ranking, &self.database);
+        let key = format!("web:{}:{}", action.provider_id, action.query);
+        let score = WEB_PRIMARY_SCORE + ranking_bonus(&ranking_bonuses, &key);
+        let mut scored = vec![SearchResult::web(action.clone(), score)];
+        append_web_suggestions(
+            &mut scored,
+            &self.web,
+            &action,
+            suggestions,
+            &ranking_bonuses,
+        );
+        (scored.len() > 1).then(|| finish_results(scored, preferences.max_results))
     }
 }
 
@@ -569,7 +578,7 @@ fn quick_link_results(
     raw_query: &str,
     catalog: &QuickLinkCatalog,
     preferences: &Settings,
-    database: &Path,
+    ranking_bonuses: &HashMap<String, i64>,
 ) -> Option<Vec<SearchResult>> {
     if !preferences.quick_links || raw_query.trim().is_empty() || !catalog.has_keyword(raw_query) {
         return None;
@@ -579,14 +588,14 @@ fn quick_link_results(
     let mut scored = Vec::new();
     for matched in matches.iter().take(8) {
         let key = format!("quick-link:{}", matched.link.id);
-        let score = matched.score + ranking_bonus(preferences.learning_ranking, database, &key);
+        let score = matched.score + ranking_bonus(ranking_bonuses, &key);
         scored.push(SearchResult::quick_link(matched.action.clone(), score));
     }
     if matches.is_empty()
         && let Some(prompt) = catalog.prompt_for_keyword(raw_query)
     {
         let key = format!("quick-link:{}", prompt.link_id);
-        let score = 2_200 + ranking_bonus(preferences.learning_ranking, database, &key);
+        let score = 2_200 + ranking_bonus(ranking_bonuses, &key);
         scored.push(SearchResult::quick_link_prompt(prompt, score));
     }
     Some(finish_results(scored, preferences.max_results))
@@ -597,8 +606,7 @@ fn append_web_suggestions(
     web: &WebSearchEngine,
     primary: &WebSearchAction,
     suggestions: impl IntoIterator<Item = String>,
-    learning_ranking: bool,
-    database: &Path,
+    ranking_bonuses: &HashMap<String, i64>,
 ) {
     let mut seen = HashSet::new();
     seen.insert(primary.query.trim().to_lowercase());
@@ -613,8 +621,7 @@ fn append_web_suggestions(
             continue;
         };
         let key = format!("web:{}:{}", action.provider_id, action.query);
-        let score =
-            WEB_SUGGESTION_SCORE - added as i64 + ranking_bonus(learning_ranking, database, &key);
+        let score = WEB_SUGGESTION_SCORE - added as i64 + ranking_bonus(ranking_bonuses, &key);
         let mut result = SearchResult::web(action, score);
         result.result.subtitle = format!("{} · 搜索建议", primary.provider_name);
         scored.push(result);
@@ -710,11 +717,15 @@ fn is_word_boundary(previous: Option<&char>) -> bool {
     previous.is_none_or(|character| !character.is_alphanumeric())
 }
 
-fn ranking_bonus(enabled: bool, database: &Path, key: &str) -> i64 {
+fn ranking_bonuses(enabled: bool, database: &Path) -> HashMap<String, i64> {
     if !enabled || database.as_os_str().is_empty() {
-        return 0;
+        return HashMap::new();
     }
-    crate::usage::score_bonus(database, key).unwrap_or_default()
+    crate::usage::score_bonuses(database).unwrap_or_default()
+}
+
+fn ranking_bonus(bonuses: &HashMap<String, i64>, key: &str) -> i64 {
+    bonuses.get(key).copied().unwrap_or_default()
 }
 
 fn is_image_path(path: &Path) -> bool {
@@ -999,6 +1010,23 @@ mod tests {
     }
 
     #[test]
+    fn initial_web_result_does_not_wait_for_online_suggestions() {
+        let mut preferences = local_settings(false);
+        preferences.web_search = true;
+        preferences.web_suggestions = true;
+        preferences.quick_links = false;
+        let engine = test_engine(Vec::new(), PathBuf::new(), preferences);
+
+        let results = engine.search("? alter launcher");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, ResultKind::Web);
+        assert!(matches!(
+            results[0].payload.as_ref(),
+            Some(ResultPayload::Web(action)) if action.query == "alter launcher"
+        ));
+    }
+
+    #[test]
     fn quick_links_only_claim_explicit_keyword_queries() {
         let link = QuickLink::from_form(
             Some("job-details"),
@@ -1020,7 +1048,8 @@ mod tests {
 
         let preferences = local_settings(false);
         let results =
-            quick_link_results("job j-056rekk80h", &catalog, &preferences, Path::new("")).unwrap();
+            quick_link_results("job j-056rekk80h", &catalog, &preferences, &HashMap::new())
+                .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].kind, ResultKind::QuickLink);
         assert!(matches!(
@@ -1028,16 +1057,17 @@ mod tests {
             Some(ResultPayload::QuickLink(_))
         ));
 
-        let prompt = quick_link_results("job", &catalog, &preferences, Path::new("")).unwrap();
+        let prompt = quick_link_results("job", &catalog, &preferences, &HashMap::new()).unwrap();
         assert_eq!(prompt.len(), 1);
         assert_eq!(prompt[0].kind, ResultKind::QuickLink);
         assert!(prompt[0].payload.is_none());
 
         let mut disabled = preferences.clone();
         disabled.quick_links = false;
-        assert!(quick_link_results("job value", &catalog, &disabled, Path::new("")).is_none());
+        assert!(quick_link_results("job value", &catalog, &disabled, &HashMap::new()).is_none());
         assert!(
-            quick_link_results("ordinary search", &catalog, &preferences, Path::new("")).is_none()
+            quick_link_results("ordinary search", &catalog, &preferences, &HashMap::new(),)
+                .is_none()
         );
     }
 
@@ -1110,8 +1140,7 @@ mod tests {
                 "rust wayland".to_owned(),
                 "rust extra".to_owned(),
             ],
-            false,
-            &PathBuf::new(),
+            &HashMap::new(),
         );
 
         assert_eq!(scored.len(), 6); // primary + at most five suggestions
