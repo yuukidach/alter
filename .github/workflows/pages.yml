@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           mkdir -p _site/assets
           cp -R site/. _site/
-          cp screenshots/alter-search.png _site/assets/alter-search.png
+          cp screenshots/alter-search-rounded.png _site/assets/alter-search.png
           cp resources/alter_icon.png _site/assets/alter-icon.png
 
       - name: Configure GitHub Pages

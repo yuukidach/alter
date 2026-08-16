@@ -4,7 +4,7 @@
 
 Alter is a fast, keyboard-first launcher for **Hyprland + Wayland**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 overlay.
 
-![Alter search interface](screenshots/alter-search.png)
+![Alter search interface](screenshots/alter-search-rounded.png)
 
 ## Features
 

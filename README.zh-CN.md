@@ -4,7 +4,7 @@
 
 Alter 是面向 **Hyprland + Wayland** 的快速启动器，提供应用和文件搜索、剪贴板历史、网页搜索，以及 Quick Links、Workflow、Snippet 等扩展，全部集中在一个 GTK4 浮层中。
 
-![Alter 搜索界面](screenshots/alter-search.png)
+![Alter 搜索界面](screenshots/alter-search-rounded.png)
 
 ## 功能
 
