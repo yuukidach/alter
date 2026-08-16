@@ -374,26 +374,8 @@ languageButton.addEventListener("click", () => {
 document.querySelectorAll("[data-mode]").forEach((button) => {
   button.addEventListener("click", () => {
     renderDemo(button.dataset.mode);
-    restartDemoRotation();
   });
 });
-
-const modeNames = Object.keys(demoModes);
-let rotationTimer;
-
-function restartDemoRotation() {
-  window.clearInterval(rotationTimer);
-  rotationTimer = window.setInterval(() => {
-    const nextIndex = (modeNames.indexOf(currentMode) + 1) % modeNames.length;
-    renderDemo(modeNames[nextIndex]);
-  }, 4800);
-}
-
-const demo = document.querySelector(".hero-demo");
-demo.addEventListener("mouseenter", () => window.clearInterval(rotationTimer));
-demo.addEventListener("mouseleave", restartDemoRotation);
-demo.addEventListener("focusin", () => window.clearInterval(rotationTimer));
-demo.addEventListener("focusout", restartDemoRotation);
 
 document.querySelectorAll("[data-install-tab]").forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -502,20 +484,4 @@ if ("IntersectionObserver" in window) {
     .forEach((node) => node.classList.add("visible"));
 }
 
-const pointerGlow = document.querySelector(".pointer-glow");
-let pointerFrame;
-window.addEventListener(
-  "pointermove",
-  (event) => {
-    if (event.pointerType === "touch") return;
-    window.cancelAnimationFrame(pointerFrame);
-    pointerFrame = window.requestAnimationFrame(() => {
-      pointerGlow.style.left = `${event.clientX}px`;
-      pointerGlow.style.top = `${event.clientY}px`;
-    });
-  },
-  { passive: true },
-);
-
 applyLanguage(currentLanguage);
-restartDemoRotation();

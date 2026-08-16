@@ -39,13 +39,7 @@ html {
 body {
   margin: 0;
   overflow-x: hidden;
-  background:
-    radial-gradient(
-      circle at 52% -25%,
-      rgba(126, 87, 214, 0.15),
-      transparent 34%
-    ),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -59,8 +53,8 @@ body::before {
   z-index: -1;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.009) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.009) 1px, transparent 1px);
   background-size: 48px 48px;
   content: "";
   pointer-events: none;
@@ -149,31 +143,6 @@ code {
 :focus-visible {
   outline: 2px solid var(--accent-bright);
   outline-offset: 4px;
-}
-
-.pointer-glow {
-  position: fixed;
-  z-index: -1;
-  top: 0;
-  left: 0;
-  width: 520px;
-  height: 520px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(137, 92, 246, 0.075),
-    transparent 68%
-  );
-  opacity: 0;
-  pointer-events: none;
-  transform: translate3d(-50%, -50%, 0);
-  transition: opacity 300ms ease;
-}
-
-@media (pointer: fine) {
-  body:hover .pointer-glow {
-    opacity: 1;
-  }
 }
 
 /* Navigation */
@@ -316,7 +285,6 @@ code {
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.07);
   color: var(--text);
-  transform: translateY(-1px);
 }
 
 .menu-toggle {
@@ -368,37 +336,6 @@ code {
   pointer-events: none;
 }
 
-.hero-orb {
-  position: absolute;
-  z-index: -2;
-  border-radius: 999px;
-  filter: blur(1px);
-  pointer-events: none;
-}
-
-.hero-orb-one {
-  top: 11%;
-  right: -13%;
-  width: 700px;
-  height: 700px;
-  border: 1px solid rgba(167, 139, 250, 0.1);
-  background: radial-gradient(
-    circle at 40% 45%,
-    rgba(110, 66, 220, 0.14),
-    transparent 60%
-  );
-  box-shadow: inset 0 0 130px rgba(110, 66, 220, 0.06);
-}
-
-.hero-orb-two {
-  top: 24%;
-  left: -240px;
-  width: 460px;
-  height: 460px;
-  background: rgba(87, 61, 142, 0.04);
-  filter: blur(80px);
-}
-
 .hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.86fr) minmax(560px, 1.14fr);
@@ -439,30 +376,11 @@ code {
   height: 7px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 12px rgba(110, 231, 183, 0.68);
+  box-shadow: 0 0 8px rgba(110, 231, 183, 0.36);
 }
 
 .status-dot::after {
-  position: absolute;
-  inset: -4px;
-  border: 1px solid rgba(110, 231, 183, 0.3);
-  border-radius: 50%;
-  content: "";
-  animation: statusPulse 2.5s ease-out infinite;
-}
-
-@keyframes statusPulse {
-  0% {
-    opacity: 0;
-    transform: scale(0.7);
-  }
-  30% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.8);
-  }
+  display: none;
 }
 
 .hero h1 {
@@ -471,7 +389,7 @@ code {
   font-size: clamp(58px, 6.2vw, 94px);
   font-weight: 730;
   letter-spacing: -0.072em;
-  line-height: 0.98;
+  line-height: 1.12;
 }
 
 .hero h1 > span {
@@ -485,6 +403,7 @@ html[data-language="zh"] .hero h1 {
 html[data-language="en"] .hero h1 {
   font-size: clamp(54px, 5vw, 74px);
   letter-spacing: -0.062em;
+  line-height: 1.24;
 }
 
 .gradient-text {
@@ -539,22 +458,22 @@ html[data-language="en"] .hero h1 {
 }
 
 .button:hover {
-  transform: translateY(-2px);
+  transform: none;
 }
 
 .button:hover svg:last-child {
-  transform: translateX(3px);
+  transform: none;
 }
 
 .button-primary {
   background: #f4f1fa;
-  box-shadow: 0 12px 36px rgba(211, 197, 244, 0.13);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   color: #16131c;
 }
 
 .button-primary:hover {
   background: #fff;
-  box-shadow: 0 16px 42px rgba(211, 197, 244, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
 .button-ghost {
@@ -600,34 +519,21 @@ html[data-language="en"] .hero h1 {
 .hero-demo {
   position: relative;
   min-width: 0;
-  transform: perspective(1600px) rotateY(-4deg) rotateX(1.5deg);
-  transform-origin: left center;
-  transition: transform 500ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform: none;
 }
 
 .hero-demo:hover {
-  transform: perspective(1600px) rotateY(-1deg) rotateX(0deg) translateY(-4px);
-}
-
-.demo-glow {
-  position: absolute;
-  z-index: -1;
-  inset: 7% -7% -8% 4%;
-  border-radius: 44px;
-  background: rgba(118, 74, 220, 0.22);
-  filter: blur(70px);
-  opacity: 0.55;
+  transform: none;
 }
 
 .launcher-window {
   overflow: hidden;
-  border: 1px solid rgba(179, 157, 235, 0.21);
+  border: 1px solid rgba(179, 157, 235, 0.16);
   border-radius: 24px;
   background: rgba(17, 17, 23, 0.94);
   box-shadow:
-    0 54px 120px rgba(0, 0, 0, 0.62),
-    0 2px 0 rgba(255, 255, 255, 0.04) inset,
-    0 0 0 1px rgba(0, 0, 0, 0.35);
+    0 28px 70px rgba(0, 0, 0, 0.46),
+    0 1px 0 rgba(255, 255, 255, 0.035) inset;
   backdrop-filter: blur(26px);
 }
 
@@ -966,21 +872,11 @@ html[data-language="en"] .hero h1 {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  animation: scrollBob 1.8s ease-in-out infinite;
+  animation: none;
 }
 
 .scroll-cue:hover {
   color: var(--text-soft);
-}
-
-@keyframes scrollBob {
-  0%,
-  100% {
-    transform: translateY(-2px);
-  }
-  50% {
-    transform: translateY(3px);
-  }
 }
 
 /* Feature bento */
@@ -1051,17 +947,7 @@ html[data-language="en"] .hero h1 {
   padding: 30px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background:
-    radial-gradient(
-      circle at 90% 0%,
-      rgba(139, 92, 246, 0.08),
-      transparent 32%
-    ),
-    linear-gradient(
-      145deg,
-      rgba(255, 255, 255, 0.035),
-      rgba(255, 255, 255, 0.012)
-    );
+  background: rgba(255, 255, 255, 0.022);
   isolation: isolate;
   transition:
     border-color 300ms ease,
@@ -1070,31 +956,16 @@ html[data-language="en"] .hero h1 {
 }
 
 .feature-card::before {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  background: linear-gradient(
-    115deg,
-    transparent 10%,
-    rgba(255, 255, 255, 0.035) 48%,
-    transparent 70%
-  );
-  content: "";
-  opacity: 0;
-  transform: translateX(-30%);
-  transition:
-    opacity 350ms ease,
-    transform 700ms ease;
+  display: none;
 }
 
 .feature-card:hover {
   border-color: rgba(167, 139, 250, 0.21);
-  transform: translateY(-4px);
+  transform: none;
 }
 
 .feature-card:hover::before {
-  opacity: 1;
-  transform: translateX(25%);
+  display: none;
 }
 
 .feature-card-wide {
@@ -1157,7 +1028,7 @@ html[data-language="en"] .hero h1 {
   border-radius: 16px;
   background: rgba(7, 7, 9, 0.72);
   box-shadow: 0 22px 45px rgba(0, 0, 0, 0.34);
-  transform: rotate(-1.4deg);
+  transform: none;
 }
 
 .scope-command {
@@ -1290,12 +1161,12 @@ html[data-language="en"] .hero h1 {
   padding: 14px;
   border-color: rgba(167, 139, 250, 0.22);
   background: linear-gradient(150deg, #1c1b24, #121216);
-  transform: rotate(1.2deg);
+  transform: none;
   transition: transform 320ms ease;
 }
 
 .feature-card:hover .clip-card-front {
-  transform: translateY(-4px) rotate(0deg);
+  transform: none;
 }
 
 .clip-top,
@@ -1364,7 +1235,7 @@ html[data-language="en"] .hero h1 {
   border-color: rgba(167, 139, 250, 0.32);
   background: rgba(139, 92, 246, 0.12);
   color: var(--accent-bright);
-  box-shadow: 0 0 30px rgba(139, 92, 246, 0.14);
+  box-shadow: none;
 }
 
 .flow-node.success {
@@ -1382,22 +1253,7 @@ html[data-language="en"] .hero h1 {
 }
 
 .workflow-visual i::after {
-  position: absolute;
-  top: 0;
-  width: 28%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  content: "";
-  animation: signalMove 2.2s linear infinite;
-}
-
-@keyframes signalMove {
-  from {
-    left: -35%;
-  }
-  to {
-    left: 110%;
-  }
+  display: none;
 }
 
 .performance-visual {
@@ -1447,9 +1303,9 @@ html[data-language="en"] .hero h1 {
   width: 7px;
   border-radius: 5px 5px 2px 2px;
   background: linear-gradient(to top, var(--accent-deep), var(--accent-bright));
-  opacity: 0.76;
+  opacity: 0.58;
   transform-origin: bottom;
-  animation: bars 2.6s ease-in-out infinite alternate;
+  animation: none;
 }
 
 .signal-bars i:nth-child(1) {
@@ -1471,13 +1327,6 @@ html[data-language="en"] .hero h1 {
 .signal-bars i:nth-child(5) {
   height: 92%;
   animation-delay: -1.2s;
-}
-
-@keyframes bars {
-  to {
-    transform: scaleY(0.64);
-    opacity: 0.45;
-  }
 }
 
 .calculator-visual {
@@ -1575,7 +1424,7 @@ html[data-language="en"] .hero h1 {
   border: 1px solid rgba(167, 139, 250, 0.3);
   border-radius: 22px;
   background: radial-gradient(circle at 35% 30%, #3a2a61, #191522 72%);
-  box-shadow: 0 0 50px rgba(139, 92, 246, 0.2);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
   color: var(--accent-bright);
   place-items: center;
   transform: translate(-50%, -50%) rotate(-3deg);
@@ -1607,33 +1456,19 @@ html[data-language="en"] .hero h1 {
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 14px var(--accent);
+  box-shadow: none;
   content: "";
 }
 
 .orbit-one {
   width: 190px;
   height: 100px;
-  animation: orbitTilt 8s ease-in-out infinite alternate;
 }
 
 .orbit-two {
   width: 110px;
   height: 205px;
   transform: translate(-50%, -50%) rotate(38deg);
-  animation: orbitTiltTwo 10s ease-in-out infinite alternate;
-}
-
-@keyframes orbitTilt {
-  to {
-    transform: translate(-50%, -50%) rotate(12deg);
-  }
-}
-
-@keyframes orbitTiltTwo {
-  to {
-    transform: translate(-50%, -50%) rotate(68deg);
-  }
 }
 
 .local-label {
@@ -1767,20 +1602,11 @@ html[data-language="en"] .hero h1 {
   border: 1px solid var(--line-strong);
   border-radius: 24px;
   background: #101015;
-  box-shadow: var(--shadow);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.34);
 }
 
 .product-shot::before {
-  position: absolute;
-  z-index: -1;
-  top: -30%;
-  left: 18%;
-  width: 64%;
-  height: 70%;
-  border-radius: 50%;
-  background: rgba(139, 92, 246, 0.24);
-  content: "";
-  filter: blur(100px);
+  display: none;
 }
 
 .shot-toolbar {
@@ -1818,13 +1644,7 @@ html[data-language="en"] .hero h1 {
   position: relative;
   overflow: hidden;
   padding: 12px 12px 0;
-  background:
-    radial-gradient(
-      circle at 50% 0%,
-      rgba(139, 92, 246, 0.14),
-      transparent 45%
-    ),
-    #0b0b0e;
+  background: #0b0b0e;
 }
 
 .shot-frame img {
@@ -1832,21 +1652,9 @@ html[data-language="en"] .hero h1 {
   height: auto;
   border: 1px solid rgba(167, 139, 250, 0.16);
   border-bottom: 0;
-  border-radius: 13px 13px 0 0;
+  border-radius: clamp(10px, 2.2vw, 32px) clamp(10px, 2.2vw, 32px) 0 0;
   filter: saturate(0.93) contrast(1.03);
   object-fit: contain;
-}
-
-.shot-sheen {
-  position: absolute;
-  inset: 12px 12px 0;
-  border-radius: 13px 13px 0 0;
-  background: linear-gradient(
-    120deg,
-    rgba(255, 255, 255, 0.045),
-    transparent 23%
-  );
-  pointer-events: none;
 }
 
 .product-shot figcaption {
@@ -1872,22 +1680,8 @@ html[data-language="en"] .hero h1 {
   overflow: hidden;
   padding: 138px 0 42px;
   border-top: 1px solid var(--line);
-  background:
-    linear-gradient(to bottom, rgba(139, 92, 246, 0.025), transparent 35%),
-    #0b0b0e;
+  background: #0b0b0e;
   isolation: isolate;
-}
-
-.install-orb {
-  position: absolute;
-  z-index: -1;
-  right: -12%;
-  bottom: 6%;
-  width: 620px;
-  height: 620px;
-  border-radius: 50%;
-  background: rgba(109, 66, 220, 0.085);
-  filter: blur(100px);
 }
 
 .install-grid {
@@ -2081,10 +1875,8 @@ html[data-language="en"] .hero h1 {
   align-items: center;
   justify-content: space-between;
   gap: 30px;
-  background:
-    linear-gradient(110deg, rgba(255, 255, 255, 0.1), transparent 60%),
-    linear-gradient(100deg, #2c203f, #20182e 55%, #17131f);
-  box-shadow: 0 32px 70px rgba(0, 0, 0, 0.25);
+  background: #18151e;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.22);
 }
 
 .final-cta > div {
@@ -2166,11 +1958,11 @@ html[data-language="en"] .hero h1 {
 
 .js .reveal {
   opacity: 0;
-  transform: translateY(18px);
+  transform: translateY(8px);
   transition:
-    opacity 700ms cubic-bezier(0.2, 0.75, 0.25, 1),
-    transform 700ms cubic-bezier(0.2, 0.75, 0.25, 1);
-  transition-delay: calc(var(--delay, 0) * 85ms);
+    opacity 480ms ease,
+    transform 480ms ease;
+  transition-delay: calc(var(--delay, 0) * 55ms);
 }
 
 .js .reveal[data-delay="1"] {
@@ -2189,18 +1981,6 @@ html[data-language="en"] .hero h1 {
 .js .reveal.visible {
   opacity: 1;
   transform: translateY(0);
-}
-
-.js .hero-demo.reveal {
-  transform: perspective(1600px) rotateY(-4deg) rotateX(1.5deg) translateY(18px);
-}
-
-.js .hero-demo.reveal.visible {
-  transform: perspective(1600px) rotateY(-4deg) rotateX(1.5deg) translateY(0);
-}
-
-.js .hero-demo.reveal.visible:hover {
-  transform: perspective(1600px) rotateY(-1deg) rotateX(0deg) translateY(-4px);
 }
 
 /* Responsive */
@@ -2579,10 +2359,6 @@ html[data-language="en"] .hero h1 {
 
   .shot-frame {
     padding: 6px 6px 0;
-  }
-
-  .shot-sheen {
-    inset: 6px 6px 0;
   }
 
   .product-shot figcaption {
