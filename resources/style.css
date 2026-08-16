@@ -149,9 +149,9 @@ window.alter-window.background {
 }
 
 .brand-block {
-  min-width: 58px;
+  min-width: 40px;
   min-height: 58px;
-  padding: 0 2px;
+  padding: 0;
   border-radius: 18px;
   background-image: radial-gradient(circle at center,
                                     rgba(167, 132, 247, 0.10),
