@@ -63,7 +63,7 @@ bind = SUPER SHIFT, C, exec, /path/to/alter --clipboard
 | `a query` | 搜索应用 |
 | `f query` | 搜索文件 |
 | `c query` | 搜索剪贴板历史 |
-| `? query` / `web query` | DuckDuckGo 搜索 |
+| `? query` / `web query` | Google 搜索 |
 | `g query` / `b query` / `ddg query` | Google / Bing / DuckDuckGo |
 | `settings` 或 `Ctrl+,` | 打开设置 |
 

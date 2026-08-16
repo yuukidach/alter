@@ -61,7 +61,7 @@ Reload Hyprland with `hyprctl reload`. The daemon stays hidden until a shortcut 
 | `a query` | Search applications |
 | `f query` | Search files |
 | `c query` | Search clipboard history |
-| `? query` / `web query` | DuckDuckGo search |
+| `? query` / `web query` | Google search |
 | `g query` / `b query` / `ddg query` | Google / Bing / DuckDuckGo |
 | `settings` or `Ctrl+,` | Open settings |
 

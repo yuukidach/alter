@@ -210,6 +210,14 @@ pub fn build(
         .default_width(1000)
         .default_height(540)
         .build();
+    // GTK themes commonly attach a `.background` class to ApplicationWindow.
+    // A bare `window { background: transparent; }` rule loses to that more
+    // specific selector and leaves an opaque rectangle behind our rounded
+    // surface. Use an application class so the real Wayland surface keeps
+    // transparent corner pixels on every theme.
+    window.add_css_class("alter-window");
+    window.connect_realize(clear_window_opaque_region);
+    window.connect_map(clear_window_opaque_region);
 
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
@@ -258,8 +266,8 @@ pub fn build(
 
     let entry = SearchEntry::new();
     entry.set_placeholder_text(Some(language.text(
-        "搜索应用、文件和剪贴板…",
-        "Search apps, files and clipboard…",
+        "搜索应用、文件、剪贴板或网页…",
+        "Search apps, files, clipboard, or the web…",
     )));
     entry.set_hexpand(true);
     entry.set_valign(Align::Center);
@@ -267,8 +275,10 @@ pub fn build(
     header.append(&entry);
 
     let settings_button = Button::new();
-    let settings_image = Image::from_icon_name(settings_icon_name());
-    settings_image.set_pixel_size(20);
+    let settings_image = bundled_icon("toolbar-settings.svg")
+        .unwrap_or_else(|| Image::from_icon_name(settings_icon_name()));
+    settings_image.set_pixel_size(24);
+    settings_image.set_size_request(24, 24);
     settings_button.set_child(Some(&settings_image));
     settings_button.set_tooltip_text(Some(language.text("设置（Ctrl+,）", "Settings (Ctrl+,)")));
     settings_button.add_css_class("icon-button");
@@ -964,7 +974,8 @@ fn build_preview_panel(language: Language) -> PreviewWidgets {
     empty.set_margin_start(28);
     empty.set_margin_end(28);
 
-    let empty_icon = themed_icon(&["edit-paste-symbolic"], "edit-paste-symbolic");
+    let empty_icon = bundled_icon("result-clipboard.svg")
+        .unwrap_or_else(|| themed_icon(&["edit-paste-symbolic"], "edit-paste-symbolic"));
     empty_icon.set_pixel_size(30);
     empty_icon.add_css_class("preview-empty-icon");
     empty_icon.set_halign(Align::Center);
@@ -1268,10 +1279,7 @@ fn show_action_panel(
                     list,
                     action_title,
                     action_subtitle,
-                    themed_icon(
-                        &[action_icon_name(descriptor.kind)],
-                        action_icon_name(descriptor.kind),
-                    ),
+                    action_icon(descriptor.kind),
                     descriptor.destructive,
                 );
             }
@@ -1301,9 +1309,7 @@ fn show_action_panel(
                     .icon
                     .as_deref()
                     .and_then(|icon| application_icon(icon, &matched.workflow.source))
-                    .unwrap_or_else(|| {
-                        themed_icon(&["system-run-symbolic"], "system-run-symbolic")
-                    });
+                    .unwrap_or_else(|| bundled_or_themed("action-run.svg", "system-run-symbolic"));
                 let action_subtitle = if action.subtitle.is_empty() {
                     language.text("执行 Workflow 动作", "Run Workflow action")
                 } else {
@@ -1343,8 +1349,8 @@ fn append_action_row(list: &ListBox, title: &str, subtitle: &str, icon: Image, d
     icon_frame.set_valign(Align::Center);
     icon_frame.set_halign(Align::Center);
     icon_frame.set_size_request(40, 40);
-    icon.set_pixel_size(22);
-    icon.set_size_request(22, 22);
+    icon.set_pixel_size(28);
+    icon.set_size_request(28, 28);
     icon.set_valign(Align::Center);
     icon.add_css_class("action-icon");
     icon_frame.set_center_widget(Some(&icon));
@@ -1411,31 +1417,15 @@ fn action_text(
     }
 }
 
-fn action_icon_name(kind: ActionKind) -> &'static str {
-    let candidates: &[&'static str] = match kind {
-        ActionKind::Open => &["document-open-symbolic", "document-open", "folder-symbolic"],
-        ActionKind::Reveal => &[
-            "folder-open-symbolic",
-            "folder-open",
-            "system-file-manager",
-            "folder-symbolic",
-        ],
-        ActionKind::CopyPath => &["edit-copy-symbolic", "edit-copy", "copy"],
-        ActionKind::CopyUri => &[
-            "insert-link-symbolic",
-            "insert-link",
-            "edit-copy-symbolic",
-            "edit-copy",
-            "copy",
-        ],
-        ActionKind::MoveToTrash => &[
-            "user-trash-symbolic",
-            "user-trash",
-            "edit-delete-symbolic",
-            "edit-delete",
-        ],
+fn action_icon(kind: ActionKind) -> Image {
+    let (bundled, fallback) = match kind {
+        ActionKind::Open => ("action-open.svg", "document-open-symbolic"),
+        ActionKind::Reveal => ("action-reveal.svg", "folder-open-symbolic"),
+        ActionKind::CopyPath => ("action-copy.svg", "edit-copy-symbolic"),
+        ActionKind::CopyUri => ("action-link.svg", "insert-link-symbolic"),
+        ActionKind::MoveToTrash => ("action-trash.svg", "user-trash-symbolic"),
     };
-    available_icon(candidates, "system-run-symbolic")
+    bundled_or_themed(bundled, fallback)
 }
 
 fn activate_action(
@@ -1579,40 +1569,24 @@ fn result_icon(result: &SearchResult) -> Image {
                 })
             }),
         ResultKind::File if result.target.is_dir() => {
-            themed_icon(&["folder-symbolic"], "folder-symbolic")
+            bundled_or_themed("result-folder.svg", "folder-symbolic")
         }
-        ResultKind::File => themed_icon(&["text-x-generic-symbolic"], "text-x-generic-symbolic"),
+        ResultKind::File => bundled_or_themed("result-file.svg", "text-x-generic-symbolic"),
         ResultKind::Clipboard => clipboard_result_icon(result),
-        ResultKind::Calculation => themed_icon(
-            &["accessories-calculator-symbolic"],
-            "accessories-calculator-symbolic",
-        ),
-        ResultKind::Settings => bundled_icon("settings.svg").unwrap_or_else(|| {
-            themed_icon(
-                &["preferences-system-symbolic"],
-                "preferences-system-symbolic",
-            )
-        }),
-        ResultKind::Web => themed_icon(&["web-browser-symbolic"], "web-browser-symbolic"),
+        ResultKind::Calculation => {
+            bundled_or_themed("result-calculation.svg", "accessories-calculator-symbolic")
+        }
+        ResultKind::Settings => {
+            bundled_or_themed("result-settings.svg", "preferences-system-symbolic")
+        }
+        ResultKind::Web => bundled_or_themed("result-web.svg", "web-browser-symbolic"),
         ResultKind::Workflow => result
             .icon
             .as_deref()
             .and_then(|icon| application_icon(icon, &result.target))
-            .unwrap_or_else(|| {
-                themed_icon(
-                    &["applications-utilities-symbolic"],
-                    "applications-utilities-symbolic",
-                )
-            }),
-        ResultKind::Snippet => themed_icon(&["insert-text-symbolic"], "text-x-generic-symbolic"),
-        ResultKind::QuickLink => themed_icon(
-            &[
-                "insert-link-symbolic",
-                "insert-link",
-                "web-browser-symbolic",
-            ],
-            "web-browser-symbolic",
-        ),
+            .unwrap_or_else(|| bundled_or_themed("result-workflow.svg", "system-run-symbolic")),
+        ResultKind::Snippet => bundled_or_themed("result-snippet.svg", "text-x-generic-symbolic"),
+        ResultKind::QuickLink => bundled_or_themed("result-quick-link.svg", "insert-link-symbolic"),
     };
     image.set_pixel_size(32);
     image.set_size_request(32, 32);
@@ -1624,17 +1598,17 @@ fn result_icon(result: &SearchResult) -> Image {
 
 fn clipboard_result_icon(result: &SearchResult) -> Image {
     let Some(path) = result.clipboard_path.as_deref() else {
-        return themed_icon(&["edit-paste-symbolic"], "edit-paste-symbolic");
+        return bundled_or_themed("result-clipboard.svg", "edit-paste-symbolic");
     };
     if !path.is_file() {
         return if path.is_dir() {
-            themed_icon(&["folder-symbolic"], "folder-symbolic")
+            bundled_or_themed("result-folder.svg", "folder-symbolic")
         } else {
-            themed_icon(&["text-x-generic-symbolic"], "text-x-generic-symbolic")
+            bundled_or_themed("result-file.svg", "text-x-generic-symbolic")
         };
     }
     if !is_image_path(path) {
-        return themed_icon(&["text-x-generic-symbolic"], "text-x-generic-symbolic");
+        return bundled_or_themed("result-file.svg", "text-x-generic-symbolic");
     }
     let image = Image::from_file(path);
     image.add_css_class("clipboard-thumbnail");
@@ -1710,10 +1684,30 @@ fn themed_icon(candidates: &[&'static str], fallback: &'static str) -> Image {
     Image::from_icon_name(available_icon(candidates, fallback))
 }
 
+fn bundled_or_themed(bundled_name: &str, fallback: &'static str) -> Image {
+    bundled_icon(bundled_name).unwrap_or_else(|| themed_icon(&[fallback], fallback))
+}
+
 fn bundled_icon(name: &str) -> Option<Image> {
     let bytes: &[u8] = match name {
         "app-default.svg" => include_bytes!("../resources/icons/app-default.svg"),
         "settings.svg" => include_bytes!("../resources/icons/settings.svg"),
+        "toolbar-settings.svg" => include_bytes!("../resources/icons/toolbar-settings.svg"),
+        "result-folder.svg" => include_bytes!("../resources/icons/result-folder.svg"),
+        "result-file.svg" => include_bytes!("../resources/icons/result-file.svg"),
+        "result-clipboard.svg" => include_bytes!("../resources/icons/result-clipboard.svg"),
+        "result-calculation.svg" => include_bytes!("../resources/icons/result-calculation.svg"),
+        "result-web.svg" => include_bytes!("../resources/icons/result-web.svg"),
+        "result-workflow.svg" => include_bytes!("../resources/icons/result-workflow.svg"),
+        "result-snippet.svg" => include_bytes!("../resources/icons/result-snippet.svg"),
+        "result-quick-link.svg" => include_bytes!("../resources/icons/result-quick-link.svg"),
+        "result-settings.svg" => include_bytes!("../resources/icons/result-settings.svg"),
+        "action-open.svg" => include_bytes!("../resources/icons/action-open.svg"),
+        "action-reveal.svg" => include_bytes!("../resources/icons/action-reveal.svg"),
+        "action-copy.svg" => include_bytes!("../resources/icons/action-copy.svg"),
+        "action-link.svg" => include_bytes!("../resources/icons/action-link.svg"),
+        "action-trash.svg" => include_bytes!("../resources/icons/action-trash.svg"),
+        "action-run.svg" => include_bytes!("../resources/icons/action-run.svg"),
         "settings-general.svg" => include_bytes!("../resources/icons/settings-general.svg"),
         "settings-web.svg" => include_bytes!("../resources/icons/settings-web.svg"),
         "settings-quick-links.svg" => {
@@ -3124,6 +3118,34 @@ fn install_css() {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+
+        // User GTK themes are loaded above application providers and often
+        // force `window.background` to an opaque palette color. Transparency
+        // is structural for Alter's rounded layer surface, so override only
+        // that one property above user priority while leaving all other app
+        // styles user-customizable.
+        let transparency = gtk::CssProvider::new();
+        transparency.load_from_string(
+            "window.alter-window.background { background: rgba(0, 0, 0, 0); box-shadow: none; }",
+        );
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &transparency,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
+        );
+    }
+}
+
+/// Ensure the compositor samples the alpha channel in the rounded corners.
+///
+/// GTK can infer a full-window opaque region before application CSS has been
+/// resolved, especially for layer-shell surfaces. Clearing that hint when the
+/// native surface is created and each time it is mapped preserves the actual
+/// transparent pixels rendered behind `.surface`.
+fn clear_window_opaque_region(window: &ApplicationWindow) {
+    if let Some(surface) = window.surface() {
+        #[allow(deprecated)]
+        surface.set_opaque_region(None);
     }
 }
 

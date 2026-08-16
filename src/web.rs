@@ -164,9 +164,9 @@ impl Default for WebSearchEngine {
     fn default() -> Self {
         Self {
             providers: builtin_providers(),
-            // DuckDuckGo is a conservative default for a Linux launcher.  A
-            // user can still address Google or Bing by keyword.
-            default_provider: "duckduckgo".to_owned(),
+            // Google is the unprefixed web-search provider. Bing and
+            // DuckDuckGo remain available through their explicit keywords.
+            default_provider: "google".to_owned(),
         }
     }
 }
@@ -207,7 +207,7 @@ impl WebSearchEngine {
     }
 
     pub fn default_provider(&self) -> &WebSearchProvider {
-        // `Default` always installs DuckDuckGo, and merge operations only
+        // `Default` always installs Google, and merge operations only
         // replace providers rather than removing them.
         self.provider(&self.default_provider)
             .unwrap_or(&self.providers[0])
@@ -711,7 +711,7 @@ mod tests {
                 .action_for_input("? alter launcher")
                 .unwrap()
                 .provider_id,
-            "duckduckgo"
+            "google"
         );
         assert_eq!(
             engine
@@ -722,7 +722,7 @@ mod tests {
         );
         assert_eq!(
             engine.action_for_input("网页 alter").unwrap().provider_id,
-            "duckduckgo"
+            "google"
         );
         assert!(engine.action_for_input("alter launcher").is_none());
         assert!(engine.action_for_input("g ").is_none());

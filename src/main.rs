@@ -296,8 +296,8 @@ Scopes:
   c <query>   clipboard history
 
 Web:
-  ? <query>    DuckDuckGo search
-  web <query>  DuckDuckGo search
+  ? <query>    Google search
+  web <query>  Google search
   g <query>    Google search
   b <query>    Bing search
   ddg <query>  DuckDuckGo search
