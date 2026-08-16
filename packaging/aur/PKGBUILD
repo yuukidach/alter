@@ -2,7 +2,7 @@
 
 pkgname=alter-launcher
 _srcname=alter
-pkgver=0.1.2
+pkgver=0.1.3
 pkgrel=1
 options=(!lto)
 pkgdesc="Fast Wayland launcher, global search and clipboard history for Hyprland"
