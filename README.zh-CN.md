@@ -1,6 +1,6 @@
 # Alter
 
-[![English README](https://img.shields.io/badge/English-README-blue)](README.md) [![许可证](https://img.shields.io/github/license/yuukidach/alter)](LICENSE)
+[![项目主页](https://img.shields.io/badge/项目主页-访问-8b5cf6)](https://yuukidach.github.io/alter/) [![English README](https://img.shields.io/badge/English-README-blue)](README.md) [![许可证](https://img.shields.io/github/license/yuukidach/alter)](LICENSE)
 
 Alter 是面向 **Hyprland + Wayland** 的快速启动器，提供应用和文件搜索、剪贴板历史、网页搜索，以及 Quick Links、Workflow、Snippet 等扩展，全部集中在一个 GTK4 浮层中。
 
