@@ -7,13 +7,13 @@
     <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="Alter is a fast, keyboard-first launcher for Hyprland and Wayland. Apps, files, clipboard history, and workflows in one place."
+      content="Alter is a fast, keyboard-first launcher for Linux/Wayland and Windows. Apps, files, clipboard history, and workflows in one place."
     />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Alter — Every action, closer" />
     <meta
       property="og:description"
-      content="A fast, keyboard-first launcher for Hyprland and Wayland."
+      content="A fast, keyboard-first launcher for Linux/Wayland and Windows."
     />
     <meta
       property="og:image"
@@ -86,7 +86,7 @@
           <div class="hero-copy">
             <div class="eyebrow reveal">
               <span class="status-dot"></span>
-              <span data-i18n="heroEyebrow">为 Hyprland 与 Wayland 而生</span>
+              <span data-i18n="heroEyebrow">支持 Linux / Wayland 与 Windows</span>
             </div>
             <h1 class="reveal" data-delay="1">
               <span data-i18n="heroTitleOne">少一点寻找，</span><br />
@@ -96,7 +96,7 @@
             </h1>
             <p class="hero-lead reveal" data-delay="2" data-i18n="heroLead">
               应用、文件、剪贴板与自动化工作流，全部收进一个轻快的 GTK4
-              浮层。手不离键盘，想法就不会断线。
+              启动器。手不离键盘，想法就不会断线。
             </p>
             <div class="hero-actions reveal" data-delay="3">
               <a class="button button-primary" href="#install">
@@ -367,8 +367,8 @@
                 </div>
                 <h3 data-i18n="nativeTitle">原生，所以轻快</h3>
                 <p data-i18n="nativeBody">
-                  Rust + GTK4 构建，融入 Wayland
-                  桌面；后台常驻，快捷键一按即现。
+                  Rust + GTK4 构建，Linux 使用 Wayland 浮层，Windows
+                  使用原生桌面窗口。
                 </p>
               </div>
               <div class="performance-visual" aria-hidden="true">
@@ -478,7 +478,7 @@
             <figcaption>
               <span data-i18n="shotCaption">一致、安静、随叫随到。</span>
               <span data-i18n="shotDetail"
-                >深浅主题 · 中英文界面 · Waybar 托盘</span
+                >深浅主题 · 中英文界面 · Linux / Windows</span
               >
             </figcaption>
           </figure>
@@ -493,12 +493,12 @@
             >
             <h2 data-i18n="installTitle">一条命令，开始提速。</h2>
             <p data-i18n="installLead">
-              面向运行 Hyprland 的 Wayland Linux 桌面。推荐通过 AUR
-              安装，也可以从源码构建。
+              支持 Linux/Wayland 与 Windows。Linux 可通过 AUR
+              安装，两端均可从源码构建。
             </p>
             <div class="requirement-list">
-              <span><i>01</i> Arch Linux / EndeavourOS</span>
-              <span><i>02</i> Hyprland + Wayland</span>
+              <span><i>01</i> Linux / Wayland</span>
+              <span><i>02</i> Windows + MSYS2</span>
               <span><i>03</i> GTK4</span>
             </div>
           </div>
@@ -524,6 +524,16 @@
                   data-i18n="fromSource"
                 >
                   源码
+                </button>
+                <button
+                  type="button"
+                  class="install-tab"
+                  role="tab"
+                  aria-selected="false"
+                  data-install-tab="windows"
+                  data-i18n="windows"
+                >
+                  Windows
                 </button>
               </div>
               <span>bash</span>
@@ -577,6 +587,30 @@
                   </button>
                 </div>
               </div>
+              <div class="command-panel" data-install-panel="windows" hidden>
+                <span class="terminal-comment" data-i18n="windowsComment"
+                  ># 在 MSYS2 UCRT64 终端中构建</span
+                >
+                <div class="command-row command-row-multiline">
+                  <code
+                    ><span>$</span> pacman -S --needed
+                    mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4<br /><span>$</span>
+                    cargo build --release</code
+                  >
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy="pacman -S --needed mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4&#10;cargo build --release"
+                    aria-label="复制 Windows 构建命令"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="8" y="8" width="11" height="11" rx="2" />
+                      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                    </svg>
+                    <span data-i18n="copy">复制</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="terminal-footer">
               <span class="status-dot"></span>
@@ -615,7 +649,7 @@
           <span>alter<span class="brand-dot">.</span></span>
         </a>
         <p>
-          <span data-i18n="footerMade">为更快的 Linux 桌面而造。</span>
+          <span data-i18n="footerMade">为更快的桌面而造。</span>
           <span>© 2026 Alter.</span>
         </p>
         <div class="footer-links">

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 /// Return the user's home directory without assuming that it is the current
 /// working directory.  `$HOME` is set by every normal graphical login, but we
 /// keep a safe fallback for unusual launch environments.
+#[cfg(not(windows))]
 pub fn home_dir() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
@@ -11,6 +12,22 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+#[cfg(windows)]
+pub fn home_dir() -> PathBuf {
+    env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let drive = env::var_os("HOMEDRIVE")?;
+            let path = env::var_os("HOMEPATH")?;
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            Some(home)
+        })
+        .or_else(|| env::var_os("HOME").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(not(windows))]
 pub fn data_dir() -> PathBuf {
     env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -18,11 +35,28 @@ pub fn data_dir() -> PathBuf {
         .join("alter")
 }
 
+#[cfg(windows)]
+pub fn data_dir() -> PathBuf {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join("AppData/Local"))
+        .join("Alter")
+}
+
+#[cfg(not(windows))]
 pub fn config_dir() -> PathBuf {
     env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home_dir().join(".config"))
         .join("alter")
+}
+
+#[cfg(windows)]
+pub fn config_dir() -> PathBuf {
+    env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join("AppData/Roaming"))
+        .join("Alter")
 }
 
 pub fn settings_path() -> PathBuf {
@@ -44,9 +78,12 @@ pub fn icon_path() -> Option<PathBuf> {
         candidates.push(project_root.join("resources/alter_icon.png"));
     }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/alter_icon.png"));
-    candidates.push(home_dir().join(".local/share/icons/alter.png"));
-    candidates.push(PathBuf::from(
-        "/usr/share/icons/hicolor/512x512/apps/alter.png",
-    ));
+    #[cfg(not(windows))]
+    {
+        candidates.push(home_dir().join(".local/share/icons/alter.png"));
+        candidates.push(PathBuf::from(
+            "/usr/share/icons/hicolor/512x512/apps/alter.png",
+        ));
+    }
     candidates.into_iter().find(|path| path.is_file())
 }

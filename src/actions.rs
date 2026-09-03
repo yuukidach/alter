@@ -10,9 +10,10 @@
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use std::process::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
@@ -273,25 +274,38 @@ fn execute_inner(action: ActionKind, target: &ActionTarget) -> Result<ActionOutc
     match action {
         ActionKind::Open => {
             if target.kind == TargetKind::Application {
-                run_gio_launch(target.path())?;
+                crate::platform::launch_application(target.path()).map_err(|source| {
+                    ActionError::Io {
+                        operation: "cannot launch application",
+                        source,
+                    }
+                })?;
             } else {
-                run_gio_open(target.path())?;
+                crate::platform::open_path(target.path()).map_err(|source| ActionError::Io {
+                    operation: "cannot open target",
+                    source,
+                })?;
             }
             Ok(ActionOutcome::Opened)
         }
         ActionKind::Reveal => {
             let absolute = absolute_path(target.path())?;
-            let directory = absolute.parent().unwrap_or(&absolute);
-            run_gio_open(directory)?;
+            crate::platform::reveal_path(&absolute).map_err(|source| ActionError::Io {
+                operation: "cannot reveal target",
+                source,
+            })?;
             Ok(ActionOutcome::Opened)
         }
         ActionKind::CopyPath | ActionKind::CopyUri => {
             let text = copy_text_for(action, target)?;
-            copy_to_wayland(&text)?;
+            crate::clipboard::copy_text(&text).map_err(|source| ActionError::Io {
+                operation: "cannot copy to clipboard",
+                source,
+            })?;
             Ok(ActionOutcome::CopiedToClipboard)
         }
         ActionKind::MoveToTrash => {
-            run_gio_trash(target.path())?;
+            move_to_trash(target.path())?;
             Ok(ActionOutcome::MovedToTrash)
         }
     }
@@ -342,6 +356,7 @@ pub fn copy_text_for(action: ActionKind, target: &ActionTarget) -> Result<String
 /// Relative paths are first made absolute without canonicalising them.  This
 /// keeps symlink spelling intact and allows copying a URI for a path that has
 /// just disappeared.
+#[cfg(not(windows))]
 pub fn path_to_file_uri(path: &Path) -> Result<String, ActionError> {
     if path.as_os_str().is_empty() {
         return Err(ActionError::EmptyTarget);
@@ -359,6 +374,37 @@ pub fn path_to_file_uri(path: &Path) -> Result<String, ActionError> {
         }
     }
     Ok(output)
+}
+
+#[cfg(windows)]
+pub fn path_to_file_uri(path: &Path) -> Result<String, ActionError> {
+    if path.as_os_str().is_empty() {
+        return Err(ActionError::EmptyTarget);
+    }
+    let path = absolute_path(path)?;
+    Ok(windows_file_uri(&path.to_string_lossy()))
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_file_uri(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let (prefix, value) = if let Some(unc) = normalized.strip_prefix("//") {
+        ("file://", unc)
+    } else {
+        ("file:///", normalized.as_str())
+    };
+    let mut output = String::from(prefix);
+    for byte in value.bytes() {
+        if byte == b'/' || byte == b':' || is_unreserved(byte) {
+            output.push(char::from(byte));
+        } else {
+            const HEX: &[u8; 16] = b"0123456789ABCDEF";
+            output.push('%');
+            output.push(char::from(HEX[usize::from(byte >> 4)]));
+            output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    output
 }
 
 fn absolute_path(path: &Path) -> Result<PathBuf, ActionError> {
@@ -379,7 +425,7 @@ fn path_bytes(path: &Path) -> Vec<u8> {
     path.as_os_str().as_bytes().to_vec()
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 fn path_bytes(path: &Path) -> Vec<u8> {
     path.to_string_lossy().into_owned().into_bytes()
 }
@@ -388,27 +434,24 @@ const fn is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }
 
-fn run_gio_open(path: &Path) -> Result<(), ActionError> {
-    let uri = path_to_file_uri(path)?;
-    let mut command = Command::new("gio");
-    command.arg("open").arg(uri);
-    run_command(&mut command, "gio")
-}
-
-fn run_gio_launch(desktop_file: &Path) -> Result<(), ActionError> {
-    let desktop_file = absolute_path(desktop_file)?;
-    let mut command = Command::new("gio");
-    command.arg("launch").arg(desktop_file);
-    run_command(&mut command, "gio")
-}
-
-fn run_gio_trash(path: &Path) -> Result<(), ActionError> {
+#[cfg(not(windows))]
+fn move_to_trash(path: &Path) -> Result<(), ActionError> {
     let path = absolute_path(path)?;
     let mut command = Command::new("gio");
     command.arg("trash").arg(path);
     run_command(&mut command, "gio")
 }
 
+#[cfg(windows)]
+fn move_to_trash(path: &Path) -> Result<(), ActionError> {
+    let path = absolute_path(path)?;
+    trash::delete(&path).map_err(|error| ActionError::Io {
+        operation: "cannot move target to the Recycle Bin",
+        source: io::Error::other(error.to_string()),
+    })
+}
+
+#[cfg(not(windows))]
 fn run_command(command: &mut Command, program: &'static str) -> Result<(), ActionError> {
     let status = command.status().map_err(|source| ActionError::Io {
         operation: "cannot start external command",
@@ -419,43 +462,6 @@ fn run_command(command: &mut Command, program: &'static str) -> Result<(), Actio
     } else {
         Err(ActionError::CommandFailed {
             program,
-            status: status.code(),
-        })
-    }
-}
-
-fn copy_to_wayland(text: &str) -> Result<(), ActionError> {
-    let mut child = Command::new("wl-copy")
-        .arg("--type")
-        .arg("text/plain;charset=utf-8")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|source| ActionError::Io {
-            operation: "cannot start wl-copy",
-            source,
-        })?;
-
-    let mut stdin = child.stdin.take().ok_or_else(|| ActionError::Io {
-        operation: "cannot open wl-copy standard input",
-        source: io::Error::new(io::ErrorKind::BrokenPipe, "wl-copy stdin is unavailable"),
-    })?;
-    stdin
-        .write_all(text.as_bytes())
-        .map_err(|source| ActionError::Io {
-            operation: "cannot write to wl-copy",
-            source,
-        })?;
-    drop(stdin);
-
-    let status = child.wait().map_err(|source| ActionError::Io {
-        operation: "cannot wait for wl-copy",
-        source,
-    })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(ActionError::CommandFailed {
-            program: "wl-copy",
             status: status.code(),
         })
     }
@@ -504,6 +510,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn file_uri_escapes_spaces_symbols_and_unicode() {
         let uri = path_to_file_uri(Path::new("/tmp/Alter 文档/a #1%.txt")).unwrap();
         assert_eq!(
@@ -513,10 +520,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn relative_file_uri_is_absolute_and_escaped() {
         let uri = path_to_file_uri(Path::new("folder/a b.txt")).unwrap();
         assert!(uri.starts_with("file:///"));
         assert!(uri.ends_with("/folder/a%20b.txt"));
+    }
+
+    #[test]
+    fn windows_file_uris_preserve_drive_and_unc_separators() {
+        assert_eq!(
+            windows_file_uri(r"C:\Users\Alter User\报告.txt"),
+            "file:///C:/Users/Alter%20User/%E6%8A%A5%E5%91%8A.txt"
+        );
+        assert_eq!(
+            windows_file_uri(r"\\server\share\a b.txt"),
+            "file://server/share/a%20b.txt"
+        );
     }
 
     #[cfg(unix)]

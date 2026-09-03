@@ -140,16 +140,10 @@ pub struct WebSearchAction {
 impl WebSearchAction {
     /// Open the URL using the desktop's default browser.
     ///
-    /// The URL is passed as one argument to `xdg-open`; it is not interpreted
-    /// by a shell.  Returning after spawn keeps the launcher responsive.
+    /// The URL is passed directly to the platform's default handler and is
+    /// never interpreted by a shell.
     pub fn open(&self) -> io::Result<()> {
-        Command::new("xdg-open")
-            .arg(&self.url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
+        crate::platform::open_url(&self.url)
     }
 }
 

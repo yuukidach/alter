@@ -13,7 +13,6 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 const QUERY_PLACEHOLDER: &str = "{query}";
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -266,13 +265,7 @@ pub struct QuickLinkAction {
 
 impl QuickLinkAction {
     pub fn open(&self) -> io::Result<()> {
-        Command::new("xdg-open")
-            .arg(&self.url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
+        crate::platform::open_url(&self.url)
     }
 }
 

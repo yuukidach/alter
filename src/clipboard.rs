@@ -4,10 +4,21 @@ use rusqlite::{Connection, params};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::env;
+#[cfg(not(windows))]
 use std::fs::File;
-use std::io::{self, Cursor, Read};
+#[cfg(not(windows))]
+use std::io::Cursor;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::{Child, Command, Stdio};
+#[cfg(windows)]
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+#[cfg(windows)]
+use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_CLIPBOARD_BYTES: usize = 1024 * 1024;
@@ -80,6 +91,15 @@ pub fn capture_stdin_with_retention(
         return Ok(false);
     }
 
+    store_text(path, &content, retention_days)?;
+    Ok(true)
+}
+
+fn store_text(
+    path: &Path,
+    content: &str,
+    retention_days: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
     ensure_database(path)?;
     let connection = open(path)?;
     connection.execute(
@@ -95,7 +115,7 @@ pub fn capture_stdin_with_retention(
     )?;
     drop(connection);
     prune(path, retention_days)?;
-    Ok(true)
+    Ok(())
 }
 
 pub fn recent_with_retention(
@@ -112,6 +132,7 @@ pub fn recent_with_retention(
     // Importing its JSON history makes Alter immediately useful without
     // starting a second watcher.  The integration is optional and silently
     // falls back to Alter's own SQLite store on other machines.
+    #[cfg(not(windows))]
     if let Some(external_items) = recent_clipse(limit.max(0) as usize) {
         let mut seen: HashSet<String> = items.iter().map(clipboard_item_key).collect();
         let mut external_items: Vec<_> = external_items
@@ -349,8 +370,18 @@ pub fn mark_used(path: &Path, id: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub fn copy_to_wayland(content: &str) -> io::Result<()> {
+#[cfg(not(windows))]
+pub fn copy_text(content: &str) -> io::Result<()> {
     copy_reader_to_wayland(Cursor::new(content.as_bytes()), "text/plain;charset=utf-8")
+}
+
+#[cfg(windows)]
+pub fn copy_text(content: &str) -> io::Result<()> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| io::Error::other(error.to_string()))?;
+    clipboard
+        .set_text(content.to_owned())
+        .map_err(|error| io::Error::other(error.to_string()))
 }
 
 /// Copy a file-backed Clipse entry to the Wayland clipboard.
@@ -360,7 +391,8 @@ pub fn copy_to_wayland(content: &str) -> io::Result<()> {
 /// advertised as an RFC 3986 encoded `text/uri-list`, which is the standard
 /// clipboard representation understood by Wayland file managers. No shell is
 /// involved and neither the path nor file contents are written to output.
-pub fn copy_file_to_wayland(path: &Path) -> io::Result<()> {
+#[cfg(not(windows))]
+pub fn copy_file(path: &Path) -> io::Result<()> {
     let absolute_path = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -376,6 +408,23 @@ pub fn copy_file_to_wayland(path: &Path) -> io::Result<()> {
     copy_reader_to_wayland(Cursor::new(uri_list.into_bytes()), "text/uri-list")
 }
 
+#[cfg(windows)]
+pub fn copy_file(path: &Path) -> io::Result<()> {
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()?.join(path)
+    };
+    std::fs::metadata(&absolute_path)?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| io::Error::other(error.to_string()))?;
+    clipboard
+        .set()
+        .file_list(&[absolute_path])
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+#[cfg(not(windows))]
 fn copy_reader_to_wayland(mut source: impl Read, mime_type: &str) -> io::Result<()> {
     let mut child = Command::new("wl-copy")
         .args(["--type", mime_type])
@@ -454,10 +503,12 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
+#[cfg(not(windows))]
 pub struct ClipboardWatcher {
     child: Child,
 }
 
+#[cfg(not(windows))]
 impl ClipboardWatcher {
     pub fn start(executable: &Path) -> io::Result<Option<Self>> {
         if clipse_monitor_running() && clipse_config_path().is_file() {
@@ -475,6 +526,49 @@ impl ClipboardWatcher {
     }
 }
 
+#[cfg(windows)]
+pub struct ClipboardWatcher {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl ClipboardWatcher {
+    pub fn start(_executable: &Path) -> io::Result<Option<Self>> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let database = database_path();
+        let retention_days = crate::settings::load().clipboard_retention_days;
+        let worker = std::thread::Builder::new()
+            .name("alter-clipboard-watcher".to_owned())
+            .spawn(move || {
+                let Ok(mut clipboard) = arboard::Clipboard::new() else {
+                    return;
+                };
+                let mut previous = String::new();
+                while !thread_stop.load(Ordering::Relaxed) {
+                    if let Ok(content) = clipboard.get_text()
+                        && content != previous
+                    {
+                        previous.clone_from(&content);
+                        if !content.trim().is_empty()
+                            && !content.contains('\0')
+                            && content.len() <= MAX_CLIPBOARD_BYTES
+                        {
+                            let _ = store_text(&database, &content, retention_days);
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+            })?;
+        Ok(Some(Self {
+            stop,
+            worker: Some(worker),
+        }))
+    }
+}
+
+#[cfg(not(windows))]
 fn clipse_monitor_running() -> bool {
     let uid = current_uid().to_string();
     ["wl-paste.*clipse.*wl-store", "clipse.*wl-store"]
@@ -501,15 +595,21 @@ fn current_uid() -> u32 {
         .unwrap_or(0)
 }
 
-#[cfg(not(unix))]
-fn current_uid() -> u32 {
-    0
-}
-
+#[cfg(not(windows))]
 impl Drop for ClipboardWatcher {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ClipboardWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 

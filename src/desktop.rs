@@ -44,8 +44,14 @@ struct DesktopEntry {
     no_display: bool,
 }
 
+#[cfg(not(windows))]
 pub fn load_applications() -> Vec<AppItem> {
     load_applications_from_roots(application_roots())
+}
+
+#[cfg(windows)]
+pub fn load_applications() -> Vec<AppItem> {
+    load_windows_applications(windows_application_roots())
 }
 
 fn load_applications_from_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<AppItem> {
@@ -87,6 +93,7 @@ fn load_applications_from_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec
     values
 }
 
+#[cfg(not(windows))]
 fn application_roots() -> Vec<PathBuf> {
     let mut data_roots = Vec::new();
     data_roots.push(paths::home_dir().join(".local/share"));
@@ -109,10 +116,107 @@ fn application_roots() -> Vec<PathBuf> {
         .collect()
 }
 
+#[cfg(windows)]
+fn windows_application_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        roots.push(
+            PathBuf::from(app_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    if let Some(program_data) = std::env::var_os("PROGRAMDATA") {
+        roots.push(
+            PathBuf::from(program_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    roots
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn load_windows_applications(roots: impl IntoIterator<Item = PathBuf>) -> Vec<AppItem> {
+    let mut seen = HashSet::new();
+    let mut apps = Vec::new();
+
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&root)
+            .follow_links(false)
+            .max_depth(8)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let supported = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| {
+                    ["lnk", "url", "appref-ms"]
+                        .iter()
+                        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+                });
+            if !supported {
+                continue;
+            }
+            let Some(name) = path
+                .file_stem()
+                .map(|value| value.to_string_lossy().trim().to_owned())
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let identity = name.to_lowercase();
+            if !seen.insert(identity) {
+                continue;
+            }
+            let keywords: Vec<String> = path
+                .strip_prefix(&root)
+                .ok()
+                .and_then(Path::parent)
+                .map(|parent| {
+                    parent
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                        .filter(|part| !part.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            apps.push(AppItem {
+                id: desktop_id(&root, path),
+                name,
+                generic_name: Some("应用程序".to_owned()),
+                keywords,
+                icon: None,
+                desktop_file: path.to_path_buf(),
+            });
+        }
+    }
+
+    apps.sort_by_cached_key(|app| app.name.to_lowercase());
+    apps
+}
+
 fn desktop_id(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .ok()
-        .map(|relative| relative.to_string_lossy().replace('/', "-"))
+        .map(|relative| {
+            relative
+                .to_string_lossy()
+                .replace('/', "-")
+                .replace('\\', "-")
+        })
         .unwrap_or_else(|| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -292,6 +396,30 @@ mod tests {
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].name, "User Entry");
         assert_eq!(apps[0].desktop_file, user_root.join("example.desktop"));
+        let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn discovers_windows_start_menu_shortcuts() {
+        let test_root = std::env::temp_dir().join(format!(
+            "alter-windows-apps-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let development = test_root.join("Development");
+        fs::create_dir_all(&development).unwrap();
+        fs::write(development.join("Visual Studio Code.lnk"), []).unwrap();
+        fs::write(test_root.join("Documentation.txt"), []).unwrap();
+
+        let apps = load_windows_applications([test_root.clone()]);
+
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name, "Visual Studio Code");
+        assert!(apps[0].keywords.iter().any(|value| value == "Development"));
+        assert_eq!(apps[0].id, "Development-Visual Studio Code.lnk");
         let _ = fs::remove_dir_all(test_root);
     }
 }

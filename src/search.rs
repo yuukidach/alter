@@ -804,8 +804,42 @@ fn find_files_with_fd(query: &str) -> Vec<PathBuf> {
                 .map(PathBuf::from)
                 .collect()
         }
-        _ => Vec::new(),
+        _ => native_file_search(query),
     }
+}
+
+#[cfg(windows)]
+fn native_file_search(query: &str) -> Vec<PathBuf> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    walkdir::WalkDir::new(crate::paths::home_dir())
+        .follow_links(false)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|entry| {
+            !entry.file_type().is_dir()
+                || !["AppData", ".git", "node_modules"]
+                    .iter()
+                    .any(|name| entry.file_name().eq_ignore_ascii_case(name))
+        })
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&query)
+        })
+        .map(|entry| entry.into_path())
+        .take(80)
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn native_file_search(_query: &str) -> Vec<PathBuf> {
+    Vec::new()
 }
 
 fn preview(value: &str, limit: usize) -> String {

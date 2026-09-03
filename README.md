@@ -2,21 +2,23 @@
 
 [![Website](https://img.shields.io/badge/Website-Visit-8b5cf6)](https://yuukidach.github.io/alter/) [![AUR version](https://img.shields.io/aur/version/alter-launcher?label=AUR)](https://aur.archlinux.org/packages/alter-launcher) [![GitHub release](https://img.shields.io/github/v/release/yuukidach/alter?display_name=tag)](https://github.com/yuukidach/alter/releases) [![License](https://img.shields.io/github/license/yuukidach/alter)](LICENSE) [![简体中文](https://img.shields.io/badge/简体中文-README.zh--CN-blue)](README.zh-CN.md)
 
-Alter is a fast, keyboard-first launcher for **Hyprland + Wayland**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 overlay.
+Alter is a fast, keyboard-first launcher for **Linux/Wayland and Windows**. It combines application and file search, clipboard history, web search, and lightweight extensions in one GTK4 window.
 
 ![Alter search interface](screenshots/alter-search-rounded.png)
 
 ## Features
 
-- Launch `.desktop` applications with fuzzy search.
-- Search local files with `plocate` or `fd` as a fallback.
+- Launch Linux `.desktop` applications or Windows Start Menu shortcuts with fuzzy search.
+- Search local files with `plocate`, `fd`, or a built-in Windows fallback.
 - Browse clipboard history with optional [Clipse](https://github.com/savedra1/clipse) integration, including text, image, and file previews.
 - Use the built-in calculator, web search, Quick Links, Workflows, and Snippets.
-- Keep Alter in the Waybar tray with light/dark themes and English/Chinese UI.
+- Use light/dark themes and English/Chinese UI; Linux also provides a Waybar-compatible tray icon.
 
 ## Requirements
 
-Alter targets Linux systems running Hyprland and Wayland.
+### Linux
+
+For the full overlay and tray integration, use Hyprland on Wayland.
 
 On Arch Linux or EndeavourOS:
 
@@ -26,6 +28,16 @@ sudo pacman -S --needed base-devel rust gtk4 gtk4-layer-shell \
 ```
 
 `plocate`, `fd`, and Clipse are optional. Clipse is needed for image and file clipboard history; without it, Alter's built-in watcher stores text entries only.
+
+### Windows
+
+Install [MSYS2](https://www.msys2.org/) and open its **UCRT64** terminal, then install the native Rust and GTK4 packages:
+
+```bash
+pacman -Syu
+pacman -S --needed git mingw-w64-ucrt-x86_64-rust \
+  mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-pkgconf
+```
 
 ## Install
 
@@ -41,6 +53,15 @@ yay -S alter-launcher
 cargo build --release
 ./target/release/alter --daemon
 ```
+
+On Windows, run these commands in the MSYS2 UCRT64 terminal:
+
+```bash
+cargo build --release
+./target/release/alter.exe
+```
+
+Keep `C:\msys64\ucrt64\bin` on `PATH` when starting the executable, because it contains the GTK runtime DLLs. Windows uses a normal centered window and exits after the launcher is dismissed; bind `alter.exe` with your preferred Windows shortcut utility. `--daemon` and the tray icon are currently Linux-only.
 
 ## Hyprland setup
 
@@ -88,14 +109,14 @@ alter --capture      Read one text item from stdin into clipboard history
 
 Most options are available from **Settings** and are saved automatically. The main files are:
 
-| Path | Purpose |
-| --- | --- |
-| `~/.config/alter/settings.conf` | Feature switches, theme, language, retention period |
-| `~/.config/alter/quick-links.json` | Keyword + URL shortcuts |
-| `~/.config/alter/web-searches.json` | Custom web-search templates |
-| `~/.config/alter/workflows/*.json` | User-defined commands and actions |
-| `~/.config/alter/snippets.json` | Text templates using `{query}` |
-| `~/.local/share/alter/history.sqlite3` | Clipboard metadata and usage ranking |
+| File | Linux location | Windows location |
+| --- | --- | --- |
+| Settings | `~/.config/alter/settings.conf` | `%APPDATA%\Alter\settings.conf` |
+| Quick Links | `~/.config/alter/quick-links.json` | `%APPDATA%\Alter\quick-links.json` |
+| Web searches | `~/.config/alter/web-searches.json` | `%APPDATA%\Alter\web-searches.json` |
+| Workflows | `~/.config/alter/workflows/*.json` | `%APPDATA%\Alter\workflows\*.json` |
+| Snippets | `~/.config/alter/snippets.json` | `%APPDATA%\Alter\snippets.json` |
+| History and ranking | `~/.local/share/alter/history.sqlite3` | `%LOCALAPPDATA%\Alter\history.sqlite3` |
 
 All extension commands are started as argument arrays, not through a shell. Keep custom commands and URL templates under your control.
 
@@ -103,14 +124,14 @@ The interface follows the system locale by default. Choose **English** or **Simp
 
 ## Clipboard notes
 
-Alter keeps clipboard entries for 30 days by default, configurable from 1 to 3650 days. Clipse entries are read from Clipse's history file; Alter does not rewrite that file. Clipboard data is stored locally and may contain sensitive text.
+Alter keeps clipboard entries for 30 days by default, configurable from 1 to 3650 days. On Linux, Clipse entries are read from Clipse's history file; Alter does not rewrite that file. Clipboard data is stored locally and may contain sensitive text.
 
 ## Limitations
 
-- Hyprland/Wayland is the supported desktop environment; X11, GNOME, and KDE integrations are not currently provided.
-- The built-in clipboard watcher records text only. Use Clipse for image and file history.
+- The layer-shell overlay and tray integration are Linux/Wayland features; Windows uses a one-shot centered window without a tray icon.
+- The built-in clipboard watcher records text only. On Linux, use Clipse for image and file history.
 - Wayland prevents applications from injecting an unconditional `Ctrl+V` into another client; Snippets and clipboard results copy to the clipboard instead.
-- File search quality depends on the freshness of the `plocate` index.
+- On Linux, file search quality depends on the freshness of the `plocate` index.
 
 ## License
 

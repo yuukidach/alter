@@ -15,10 +15,10 @@ use gtk::{
     Label, ListBox, ListBoxRow, Orientation, Paned, Picture, ScrolledWindow, SearchEntry,
     SelectionMode, SpinButton, Stack, Switch, TextView, WrapMode,
 };
+#[cfg(target_os = "linux")]
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::rc::Rc;
 use std::sync::{
     Arc,
@@ -219,23 +219,25 @@ pub fn build(
     window.connect_realize(clear_window_opaque_region);
     window.connect_map(clear_window_opaque_region);
 
-    if gtk4_layer_shell::is_supported() {
-        window.init_layer_shell();
-        window.set_namespace(Some("alter"));
-        window.set_layer(Layer::Overlay);
-        window.set_keyboard_mode(KeyboardMode::Exclusive);
-        // With no anchors on either axis, wlr-layer-shell centers the surface
-        // on the selected output instead of pinning it to the top edge.
-        window.set_anchor(Edge::Top, false);
-        window.set_anchor(Edge::Bottom, false);
-        window.set_anchor(Edge::Left, false);
-        window.set_anchor(Edge::Right, false);
-        window.set_exclusive_zone(0);
-    } else {
-        // This is only a development fallback; Alter is primarily a
-        // Wayland/layer-shell application.
-        window.set_modal(true);
+    #[cfg(target_os = "linux")]
+    {
+        if gtk4_layer_shell::is_supported() {
+            window.init_layer_shell();
+            window.set_namespace(Some("alter"));
+            window.set_layer(Layer::Overlay);
+            window.set_keyboard_mode(KeyboardMode::Exclusive);
+            // With no anchors on either axis, wlr-layer-shell centers the surface.
+            window.set_anchor(Edge::Top, false);
+            window.set_anchor(Edge::Bottom, false);
+            window.set_anchor(Edge::Left, false);
+            window.set_anchor(Edge::Right, false);
+            window.set_exclusive_zone(0);
+        } else {
+            window.set_modal(true);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    window.set_modal(true);
 
     let surface = GtkBox::new(Orientation::Vertical, 0);
     surface.add_css_class("surface");
@@ -683,6 +685,18 @@ pub fn build(
             glib::Propagation::Stop
         });
     }
+
+    // Windows has no StatusNotifierItem tray backend. Once a one-shot
+    // launcher window is dismissed, exit cleanly so the next global-shortcut
+    // invocation can start a fresh instance.
+    #[cfg(windows)]
+    window.connect_visible_notify(|window| {
+        if !window.is_visible()
+            && let Some(application) = window.application()
+        {
+            application.quit();
+        }
+    });
 
     window.present();
     entry.grab_focus();
@@ -1482,7 +1496,7 @@ fn activate_action(
                     None::<&gtk::gio::Cancellable>,
                     move |answer| {
                         if matches!(answer, Ok(1)) {
-                            std::thread::spawn(move || {
+                            run_in_background(move || {
                                 if let Err(error) = actions::execute_with_trash_confirmation(
                                     descriptor.kind,
                                     &target,
@@ -1499,7 +1513,7 @@ fn activate_action(
             }
 
             let action = descriptor.kind;
-            std::thread::spawn(move || {
+            run_in_background(move || {
                 if let Err(error) = actions::execute(action, &target) {
                     eprintln!("alter: file action failed: {error}");
                 }
@@ -1803,14 +1817,11 @@ fn activate_index(
     match result.kind {
         ResultKind::App => {
             window.set_visible(false);
-            let _ = Command::new("gio")
-                .arg("launch")
-                .arg(&result.target)
-                .spawn();
+            let _ = crate::platform::launch_application(&result.target);
         }
         ResultKind::File => {
             window.set_visible(false);
-            let _ = Command::new("gio").arg("open").arg(&result.target).spawn();
+            let _ = crate::platform::open_path(&result.target);
         }
         ResultKind::Clipboard => {
             window.set_visible(false);
@@ -1819,12 +1830,12 @@ fn activate_index(
             let content = result.clipboard_content;
             if let Some(id) = id {
                 let database = database.to_path_buf();
-                std::thread::spawn(move || {
+                run_in_background(move || {
                     let _ = clipboard::mark_used(&database, id);
                     let copy_result = if let Some(path) = path {
-                        clipboard::copy_file_to_wayland(&path)
+                        clipboard::copy_file(&path)
                     } else if let Some(content) = content {
-                        clipboard::copy_to_wayland(&content)
+                        clipboard::copy_text(&content)
                     } else {
                         Ok(())
                     };
@@ -1837,8 +1848,8 @@ fn activate_index(
         ResultKind::Calculation => {
             window.set_visible(false);
             if let Some(content) = result.clipboard_content {
-                std::thread::spawn(move || {
-                    let _ = clipboard::copy_to_wayland(&content);
+                run_in_background(move || {
+                    let _ = clipboard::copy_text(&content);
                 });
             }
         }
@@ -1878,8 +1889,8 @@ fn activate_index(
         ResultKind::Snippet => {
             if let Some(ResultPayload::Snippet { content }) = result.payload {
                 window.set_visible(false);
-                std::thread::spawn(move || {
-                    let _ = clipboard::copy_to_wayland(&content);
+                run_in_background(move || {
+                    let _ = clipboard::copy_text(&content);
                 });
             }
         }
@@ -1892,6 +1903,19 @@ fn activate_index(
             }
         }
     }
+}
+
+#[cfg(not(windows))]
+fn run_in_background(task: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(task);
+}
+
+#[cfg(windows)]
+fn run_in_background(task: impl FnOnce() + Send + 'static) {
+    // A Windows launcher invocation exits as soon as its window is hidden.
+    // Finish short clipboard hand-offs before returning to the main loop so
+    // the process cannot terminate midway through SetClipboardData.
+    task();
 }
 
 fn record_result_usage(database: &Path, result: &SearchResult) {
@@ -2005,20 +2029,34 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
 
     let (file_row, file_switch) = switch_setting_row(
         language.text("文件搜索", "File search"),
-        language.text(
-            "使用 plocate / fd 搜索本机文件",
-            "Search local files with plocate / fd",
-        ),
+        if cfg!(windows) {
+            language.text(
+                "使用 fd 或内置搜索查找本机文件",
+                "Search local files with fd or the built-in scanner",
+            )
+        } else {
+            language.text(
+                "使用 plocate / fd 搜索本机文件",
+                "Search local files with plocate / fd",
+            )
+        },
         current.file_search,
     );
     search_group.append(&file_row);
 
     let (clipboard_row, clipboard_switch) = switch_setting_row(
         language.text("显示剪贴板结果", "Show clipboard results"),
-        language.text(
-            "在全局搜索中包含 Clipse 或 Alter 的历史",
-            "Include Clipse or Alter history in global search",
-        ),
+        if cfg!(windows) {
+            language.text(
+                "在全局搜索中包含 Alter 的历史",
+                "Include Alter clipboard history in global search",
+            )
+        } else {
+            language.text(
+                "在全局搜索中包含 Clipse 或 Alter 的历史",
+                "Include Clipse or Alter history in global search",
+            )
+        },
         current.clipboard_search,
     );
     let clipboard_group = GtkBox::new(Orientation::Vertical, 0);
@@ -2111,10 +2149,17 @@ fn build_settings_page(preferences: &SharedSettings, language: Language) -> Sett
     retention_days.set_width_request(92);
     let retention_row = control_setting_row(
         language.text("剪贴板保留天数", "Clipboard retention (days)"),
-        language.text(
-            "超过期限的本地和 Clipse 文本历史会自动清理（默认 30 天）",
-            "Local and Clipse text history older than this is removed (30 days by default)",
-        ),
+        if cfg!(windows) {
+            language.text(
+                "超过期限的本地文本历史会自动清理（默认 30 天）",
+                "Local text history older than this is removed (30 days by default)",
+            )
+        } else {
+            language.text(
+                "超过期限的本地和 Clipse 文本历史会自动清理（默认 30 天）",
+                "Local and Clipse text history older than this is removed (30 days by default)",
+            )
+        },
         &retention_days,
     );
     clipboard_group.append(&retention_row);

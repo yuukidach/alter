@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 pub mod actions;
 mod calculator;
 mod clipboard;
@@ -5,10 +7,15 @@ pub mod clipboard_meta;
 mod desktop;
 mod i18n;
 mod paths;
+mod platform;
 mod quick_links;
 mod search;
 mod settings;
 pub mod snippets;
+#[cfg(target_os = "linux")]
+mod tray;
+#[cfg(not(target_os = "linux"))]
+#[path = "tray_stub.rs"]
 mod tray;
 mod ui;
 pub mod usage;
@@ -180,7 +187,10 @@ fn main() -> glib::ExitCode {
             // Startup runs only in the primary GApplication instance, so
             // command-line clients such as `alter --toggle` still exit after
             // forwarding their activation request.
-            *application_hold.borrow_mut() = Some(application.hold());
+            #[cfg(target_os = "linux")]
+            {
+                *application_hold.borrow_mut() = Some(application.hold());
+            }
             match tray::start(tray_sender.clone(), paths::icon_path().as_deref(), language) {
                 Ok(handle) => *tray_handle.borrow_mut() = Some(handle),
                 Err(error) => eprintln!("alter: tray icon is unavailable: {error}"),
@@ -275,7 +285,7 @@ fn main() -> glib::ExitCode {
 
 fn print_help() {
     println!(
-        r#"Alter — Wayland launcher, global search and clipboard history
+        r#"Alter — application launcher, global search and clipboard history
 
 Usage:
   alter [--toggle] | [--clipboard] | [--daemon] | [--capture]
@@ -303,14 +313,14 @@ Web:
   ddg <query>  DuckDuckGo search
 
 Extensions:
-  ~/.config/alter/quick-links.json Keyword + URL template shortcuts
-  ~/.config/alter/workflows/*.json  Workflow manifests
+  quick-links.json                  Keyword + URL template shortcuts
+  workflows/*.json                 Workflow manifests
   script_filter=true                Alfred-style JSON/TSV workflow results
   actions=[...]                     Named Workflow actions shown with Tab
-  ~/.config/alter/snippets.json     Snippet definitions
+  snippets.json                     Snippet definitions
 
 Startup:
-  --daemon    start hidden, keep the tray icon and wait for the shortcut
+  --daemon    start hidden (Linux tray mode)
   --capture   read one text item from stdin into clipboard history
   --toggle    activate the existing daemon and toggle its window
   --clipboard activate the existing daemon in clipboard-only search mode"#
