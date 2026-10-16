@@ -19,6 +19,8 @@ mod tray;
 mod tray;
 mod ui;
 pub mod usage;
+#[cfg(target_os = "linux")]
+mod watchdog;
 pub mod web;
 pub mod workflow;
 
@@ -86,6 +88,16 @@ fn launch_mode_from_command_line(command_line: &gio::ApplicationCommandLine) -> 
 
 fn main() -> glib::ExitCode {
     let arguments: Vec<String> = env::args().collect();
+    #[cfg(target_os = "linux")]
+    if arguments.len() == 2 && arguments[1] == watchdog::ARGUMENT {
+        return match watchdog::run() {
+            Ok(()) => glib::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("alter: focus watchdog failed: {error}");
+                glib::ExitCode::FAILURE
+            }
+        };
+    }
     if arguments.iter().any(|argument| argument == "--capture") {
         let preferences = settings::load();
         return match clipboard::capture_stdin_with_retention(
@@ -270,7 +282,7 @@ fn main() -> glib::ExitCode {
         let state = state.clone();
         let tray_handle = tray_handle.clone();
         application.connect_shutdown(move |_| {
-            if let Some(mut state) = state.borrow_mut().take() {
+            if let Some(state) = state.borrow_mut().as_mut() {
                 state.stop_watcher();
             }
             tray_handle.borrow_mut().take();
@@ -280,7 +292,10 @@ fn main() -> glib::ExitCode {
     // The application ID makes all shortcut invocations reach the existing
     // daemon.  Registered options are forwarded through GApplication's
     // command-line D-Bus method so `--clipboard` can select a dedicated scope.
-    application.run_with_args(&arguments)
+    let exit_code = application.run_with_args(&arguments);
+    // Keep the focus watchdog alive through shutdown callbacks as well.
+    state.borrow_mut().take();
+    exit_code
 }
 
 fn print_help() {

@@ -71,9 +71,27 @@ Start one background instance, then bind the shortcuts you want:
 exec-once = /path/to/alter --daemon
 bind = SUPER, SPACE, exec, /path/to/alter --toggle
 bind = SUPER SHIFT, C, exec, /path/to/alter --clipboard
+bindl = SUPER CTRL SHIFT, Escape, exec, pkill -KILL -u "$(id -u)" -x alter
 ```
 
 Reload Hyprland with `hyprctl reload`. The daemon stays hidden until a shortcut is pressed and reuses the same window for later invocations.
+
+For Hyprland's Lua configuration, the emergency binding is:
+
+```lua
+hl.bind("SUPER + CTRL + SHIFT + Escape", hl.dsp.exec_cmd('pkill -KILL -u "$(id -u)" -x alter'), {
+    locked = true,
+    dont_inhibit = true,
+    submap_universal = true,
+    description = "Emergency stop Alter",
+})
+```
+
+### Recovery from a frozen launcher
+
+On Linux, Alter retains exclusive keyboard focus for immediate typing, but starts an independent focus watchdog before showing its window. GTK sends a heartbeat every 250 ms; if the window is visible and the main loop stops responding for 8 seconds, the watchdog forcefully terminates that launcher, allowing the compositor to release its focus. Hidden daemons are not timed out. The watchdog uses a separate process group and a Linux pidfd, so it can recover from a stopped launcher without risking a recycled PID. If the watchdog cannot start or its connection fails, Alter exits rather than showing an unprotected window.
+
+`Super+Ctrl+Shift+Escape` is an independent, compositor-handled emergency stop. It kills all processes named `alter` belonging to your user, skips normal cleanup, and may discard unsaved edits. Neither recovery path automatically restarts Alter; press the usual launcher shortcut when ready. `Esc`, the tray, and `--toggle` all depend on the GTK loop and cannot recover a frozen launcher. These safeguards do not recover a hung compositor or kernel.
 
 ## Usage
 

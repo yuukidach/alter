@@ -73,9 +73,27 @@ cargo build --release
 exec-once = /path/to/alter --daemon
 bind = SUPER, SPACE, exec, /path/to/alter --toggle
 bind = SUPER SHIFT, C, exec, /path/to/alter --clipboard
+bindl = SUPER CTRL SHIFT, Escape, exec, pkill -KILL -u "$(id -u)" -x alter
 ```
 
 执行 `hyprctl reload` 重新加载配置。后台实例默认隐藏，快捷键调用时显示；后续调用会复用同一个窗口。
+
+如果使用 Hyprland 的 Lua 配置，急救快捷键写法如下：
+
+```lua
+hl.bind("SUPER + CTRL + SHIFT + Escape", hl.dsp.exec_cmd('pkill -KILL -u "$(id -u)" -x alter'), {
+    locked = true,
+    dont_inhibit = true,
+    submap_universal = true,
+    description = "Emergency stop Alter",
+})
+```
+
+### 卡死恢复
+
+Linux 下保留独占键盘焦点以便唤起后直接输入，但在显示窗口前会启动独立的焦点看门狗进程。GTK 主循环每 250 毫秒发送一次心跳；窗口可见时连续 8 秒无响应，看门狗会强制结束该启动器，让合成器释放焦点。隐藏的后台实例不会因无心跳而被终止。看门狗使用独立进程组和 Linux pidfd，即使启动器被暂停也能处理，并避免因 PID 复用误杀其他程序。若看门狗无法启动或连接失效，Alter 会退出，而不是显示无保护的窗口。
+
+`Super+Ctrl+Shift+Escape` 是由合成器直接处理的独立急救键，会强制结束当前用户所有名为 `alter` 的进程，跳过正常清理，未保存的编辑可能丢失。两种恢复方式均不自动重启 Alter；需要时再次按启动快捷键即可。`Esc`、托盘和 `--toggle` 都依赖 GTK 主循环，无法救回卡死的窗口。这些措施不能恢复合成器或内核本身的卡死。
 
 ## 使用
 

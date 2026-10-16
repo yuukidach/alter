@@ -12,6 +12,7 @@ dependencies = [
  "ksni",
  "open",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "trash",

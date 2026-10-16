@@ -139,6 +139,8 @@ pub struct UiState {
     preview: PreviewWidgets,
     refresh: Rc<dyn Fn()>,
     watcher: Option<ClipboardWatcher>,
+    #[cfg(target_os = "linux")]
+    watchdog: crate::watchdog::Watchdog,
 }
 
 impl UiState {
@@ -149,8 +151,7 @@ impl UiState {
         update_preview(&self.preview, None);
         // `present()` alone does not reliably remap a layer-shell surface
         // after GTK hid it with `set_visible(false)` on all compositors.
-        self.window.set_visible(true);
-        self.window.present();
+        self.present();
         // The compositor may have remapped a hidden layer surface.  Grabbing
         // focus after present keeps the first keystroke from going elsewhere.
         self.window.set_focus_visible(true);
@@ -168,8 +169,7 @@ impl UiState {
         self.entry.set_position(-1);
         self.preview.panel.set_visible(true);
         update_preview(&self.preview, None);
-        self.window.set_visible(true);
-        self.window.present();
+        self.present();
         self.window.set_focus_visible(true);
         (self.refresh)();
     }
@@ -182,9 +182,15 @@ impl UiState {
         *self.quick_link_editing_id.borrow_mut() = None;
         self.quick_link_editor_stack.set_visible_child_name("list");
         self.stack.set_visible_child_name("settings");
+        self.present();
+        focus_settings_navigation(&self.settings_navigation);
+    }
+
+    fn present(&self) {
+        #[cfg(target_os = "linux")]
+        self.watchdog.arm();
         self.window.set_visible(true);
         self.window.present();
-        focus_settings_navigation(&self.settings_navigation);
     }
 
     pub fn stop_watcher(&mut self) {
@@ -199,6 +205,11 @@ pub fn build(
     preferences: SharedSettings,
     watcher: Option<ClipboardWatcher>,
 ) -> UiState {
+    #[cfg(target_os = "linux")]
+    let watchdog = crate::watchdog::Watchdog::start(app).unwrap_or_else(|error| {
+        eprintln!("alter: cannot protect keyboard focus; refusing to show window: {error}");
+        std::process::exit(1);
+    });
     install_css();
     let language = settings::snapshot(&preferences).language.effective();
 
@@ -698,6 +709,8 @@ pub fn build(
         }
     });
 
+    #[cfg(target_os = "linux")]
+    watchdog.arm();
     window.present();
     entry.grab_focus();
     (refresh)();
@@ -712,6 +725,8 @@ pub fn build(
         preview,
         refresh,
         watcher,
+        #[cfg(target_os = "linux")]
+        watchdog,
     }
 }
 
