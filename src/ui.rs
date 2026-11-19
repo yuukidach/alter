@@ -137,6 +137,7 @@ pub struct UiState {
     quick_link_editor_stack: Stack,
     quick_link_editing_id: Rc<RefCell<Option<String>>>,
     preview: PreviewWidgets,
+    engine: SearchEngine,
     refresh: Rc<dyn Fn()>,
     watcher: Option<ClipboardWatcher>,
     #[cfg(target_os = "linux")]
@@ -145,6 +146,7 @@ pub struct UiState {
 
 impl UiState {
     pub fn show(&self) {
+        self.engine.schedule_app_refresh_check();
         self.stack.set_visible_child_name("search");
         self.entry.set_text("");
         self.preview.panel.set_visible(false);
@@ -723,6 +725,7 @@ pub fn build(
         quick_link_editor_stack: settings_widgets.quick_link_editor_stack,
         quick_link_editing_id: settings_widgets.quick_link_editing_id,
         preview,
+        engine,
         refresh,
         watcher,
         #[cfg(target_os = "linux")]

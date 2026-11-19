@@ -1,6 +1,6 @@
 use crate::calculator;
 use crate::clipboard::{self, ClipboardItem};
-use crate::desktop::AppItem;
+use crate::desktop::{AppCatalog, AppItem};
 use crate::quick_links::{QuickLinkAction, QuickLinkCatalog};
 use crate::settings::{self, Settings, SharedSettings};
 use crate::snippets::{SnippetCatalog, SnippetMatch};
@@ -324,7 +324,7 @@ pub struct ScoredResult {
 
 #[derive(Clone)]
 pub struct SearchEngine {
-    apps: Arc<Vec<AppItem>>,
+    apps: Arc<AppCatalog>,
     database: PathBuf,
     settings: SharedSettings,
     pub web: Arc<WebSearchEngine>,
@@ -340,15 +340,28 @@ const WEB_SUGGESTION_SCORE: i64 = 1_500;
 const MAX_WEB_SUGGESTIONS: usize = 5;
 
 impl SearchEngine {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(apps: Vec<AppItem>, database: PathBuf, settings: SharedSettings) -> Self {
+        Self::with_catalog(Arc::new(AppCatalog::from_static(apps)), database, settings)
+    }
+
+    pub fn with_catalog(
+        apps: Arc<AppCatalog>,
+        database: PathBuf,
+        settings: SharedSettings,
+    ) -> Self {
         Self {
-            apps: Arc::new(apps),
+            apps,
             database,
             settings,
             web: Arc::new(WebSearchEngine::load()),
             workflows: Arc::new(crate::workflow::load_workflows().catalog()),
             snippets: Arc::new(crate::snippets::load_snippets().catalog()),
         }
+    }
+
+    pub fn schedule_app_refresh_check(&self) {
+        self.apps.schedule_check();
     }
 
     pub fn search(&self, raw_query: &str) -> Vec<SearchResult> {
@@ -439,7 +452,8 @@ impl SearchEngine {
         }
 
         if matches!(scope, Scope::All | Scope::Apps) {
-            for (rank, app) in self.apps.iter().enumerate() {
+            let apps = self.apps.snapshot();
+            for (rank, app) in apps.iter().enumerate() {
                 let score = if query.is_empty() {
                     // Consider every installed application here and let the
                     // final max-results limit keep the view compact.  This
@@ -877,7 +891,7 @@ fn age(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::desktop::AppItem;
+    use crate::desktop::{AppCatalog, AppItem};
     use crate::quick_links::QuickLink;
     use crate::settings::{Settings, shared};
     use crate::snippets::{Snippet, SnippetCatalog};
@@ -918,7 +932,7 @@ mod tests {
 
     fn test_engine(apps: Vec<AppItem>, database: PathBuf, preferences: Settings) -> SearchEngine {
         SearchEngine {
-            apps: Arc::new(apps),
+            apps: Arc::new(AppCatalog::from_static(apps)),
             database,
             settings: shared(preferences),
             web: Arc::new(WebSearchEngine::default()),
@@ -1291,5 +1305,49 @@ mod tests {
         assert!(clipboard_match_score("screenshot", &item).is_some());
         assert!(clipboard_match_score(".png", &item).is_some());
         assert!(clipboard_match_score("not-present", &item).is_none());
+    }
+
+    #[test]
+    fn searches_newly_installed_and_removed_desktop_applications_without_restart() {
+        let test_root = std::env::temp_dir().join(format!(
+            "alter-search-live-apps-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        fs::create_dir_all(&test_root).unwrap();
+
+        let mut preferences = local_settings(false);
+        preferences.quick_links = false;
+        let engine = SearchEngine {
+            apps: Arc::new(AppCatalog::from_desktop_roots([test_root.clone()])),
+            database: PathBuf::new(),
+            settings: shared(preferences),
+            web: Arc::new(WebSearchEngine::default()),
+            workflows: Arc::new(WorkflowCatalog::default()),
+            snippets: Arc::new(SnippetCatalog::default()),
+        };
+
+        assert!(engine.search("t3").is_empty());
+
+        let desktop_file = test_root.join("t3code.desktop");
+        fs::write(
+            &desktop_file,
+            "[Desktop Entry]\nType=Application\nName=T3 Code\nExec=t3code %U\n",
+        )
+        .unwrap();
+        engine.schedule_app_refresh_check();
+        let results = engine.search("t3");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, ResultKind::App);
+        assert_eq!(results[0].title, "T3 Code");
+
+        fs::remove_file(&desktop_file).unwrap();
+        engine.schedule_app_refresh_check();
+        assert!(engine.search("t3").is_empty());
+
+        let _ = fs::remove_dir_all(test_root);
     }
 }
