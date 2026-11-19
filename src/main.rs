@@ -139,10 +139,10 @@ fn main() -> glib::ExitCode {
         eprintln!("alter: clipboard metadata is unavailable: {error}");
     }
 
-    let apps = desktop::load_applications();
+    let apps = std::sync::Arc::new(desktop::AppCatalog::load());
     let preferences = settings::shared(settings::load());
     let language = settings::snapshot(&preferences).language.effective();
-    let engine = SearchEngine::new(apps, database.clone(), preferences.clone());
+    let engine = SearchEngine::with_catalog(apps, database.clone(), preferences.clone());
     let executable = env::current_exe().unwrap_or_else(|_| PathBuf::from("alter"));
     let state: Rc<RefCell<Option<ui::UiState>>> = Rc::new(RefCell::new(None));
     let pending_mode = Rc::new(Cell::new(initial_mode));

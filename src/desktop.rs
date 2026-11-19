@@ -2,7 +2,14 @@ use crate::paths;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant, SystemTime};
 use walkdir::WalkDir;
+
+/// Avoid re-statting application directories on every keystroke while still
+/// picking up newly installed or removed applications even if the launcher
+/// window remains open.
+const REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct AppItem {
@@ -44,14 +51,251 @@ struct DesktopEntry {
     no_display: bool,
 }
 
-#[cfg(not(windows))]
-pub fn load_applications() -> Vec<AppItem> {
-    load_applications_from_roots(application_roots())
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CatalogFormat {
+    DesktopEntries,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WindowsShortcuts,
 }
 
-#[cfg(windows)]
-pub fn load_applications() -> Vec<AppItem> {
-    load_windows_applications(windows_application_roots())
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EntryStamp {
+    root_index: usize,
+    path: PathBuf,
+    exists: bool,
+    is_dir: bool,
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    inode: (u64, u64, i64, i64),
+}
+
+impl EntryStamp {
+    fn missing(root_index: usize, path: PathBuf) -> Self {
+        Self {
+            root_index,
+            path,
+            exists: false,
+            is_dir: false,
+            len: 0,
+            modified: None,
+            #[cfg(unix)]
+            inode: (0, 0, 0, 0),
+        }
+    }
+
+    fn from_metadata(
+        root_index: usize,
+        path: PathBuf,
+        is_dir: bool,
+        metadata: &fs::Metadata,
+    ) -> Self {
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            )
+        };
+        Self {
+            root_index,
+            path,
+            exists: true,
+            is_dir,
+            len: if is_dir { 0 } else { metadata.len() },
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            inode,
+        }
+    }
+}
+
+struct CatalogState {
+    apps: Arc<Vec<AppItem>>,
+    fingerprint: Vec<EntryStamp>,
+    last_checked: Option<Instant>,
+}
+
+/// Cached catalog of installed applications that reloads automatically when
+/// the underlying desktop-entry or Start Menu directories change.
+pub struct AppCatalog {
+    roots: Option<Vec<PathBuf>>,
+    format: CatalogFormat,
+    state: RwLock<CatalogState>,
+}
+
+impl AppCatalog {
+    #[cfg(not(windows))]
+    pub fn load() -> Self {
+        Self::from_desktop_roots(application_roots())
+    }
+
+    #[cfg(windows)]
+    pub fn load() -> Self {
+        Self::from_windows_roots(windows_application_roots())
+    }
+
+    pub fn from_static(apps: Vec<AppItem>) -> Self {
+        Self {
+            roots: None,
+            format: CatalogFormat::DesktopEntries,
+            state: RwLock::new(CatalogState {
+                apps: Arc::new(apps),
+                fingerprint: Vec::new(),
+                last_checked: None,
+            }),
+        }
+    }
+
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn from_desktop_roots(roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self::from_roots_with_format(roots.into_iter().collect(), CatalogFormat::DesktopEntries)
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn from_windows_roots(roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self::from_roots_with_format(roots.into_iter().collect(), CatalogFormat::WindowsShortcuts)
+    }
+
+    fn from_roots_with_format(roots: Vec<PathBuf>, format: CatalogFormat) -> Self {
+        let fingerprint = fingerprint_roots(&roots, format);
+        let apps = Arc::new(load_for_format(&roots, format));
+        Self {
+            roots: Some(roots),
+            format,
+            state: RwLock::new(CatalogState {
+                apps,
+                fingerprint,
+                last_checked: Some(Instant::now()),
+            }),
+        }
+    }
+
+    /// Force the next [`Self::snapshot`] call on a worker thread to re-check
+    /// directory metadata immediately, without doing disk I/O on the UI thread.
+    pub fn schedule_check(&self) {
+        if self.roots.is_none() {
+            return;
+        }
+        if let Ok(mut state) = self.state.write() {
+            state.last_checked = None;
+        }
+    }
+
+    pub fn snapshot(&self) -> Arc<Vec<AppItem>> {
+        let Some(roots) = self.roots.as_deref() else {
+            return self
+                .state
+                .read()
+                .map(|state| Arc::clone(&state.apps))
+                .unwrap_or_default();
+        };
+
+        if let Ok(state) = self.state.read()
+            && state
+                .last_checked
+                .is_some_and(|checked| checked.elapsed() < REFRESH_CHECK_INTERVAL)
+        {
+            return Arc::clone(&state.apps);
+        }
+
+        // Capture the filesystem fingerprint before reading desktop files so
+        // any concurrent package-manager writes that land mid-scan still cause
+        // a mismatch on the following check.
+        let new_fingerprint = fingerprint_roots(roots, self.format);
+        let unchanged_apps = self.state.read().ok().and_then(|state| {
+            (state.fingerprint == new_fingerprint).then(|| Arc::clone(&state.apps))
+        });
+        if let Some(apps) = unchanged_apps {
+            if let Ok(mut state) = self.state.write()
+                && state.fingerprint == new_fingerprint
+            {
+                state.last_checked = Some(Instant::now());
+            }
+            return apps;
+        }
+
+        let reloaded = Arc::new(load_for_format(roots, self.format));
+        if let Ok(mut state) = self.state.write() {
+            state.apps = Arc::clone(&reloaded);
+            state.fingerprint = new_fingerprint;
+            state.last_checked = Some(Instant::now());
+        }
+        reloaded
+    }
+}
+
+fn load_for_format(roots: &[PathBuf], format: CatalogFormat) -> Vec<AppItem> {
+    match format {
+        CatalogFormat::DesktopEntries => load_applications_from_roots(roots.iter().cloned()),
+        CatalogFormat::WindowsShortcuts => load_windows_applications(roots.iter().cloned()),
+    }
+}
+
+fn is_supported_entry_path(path: &Path, format: CatalogFormat) -> bool {
+    match format {
+        CatalogFormat::DesktopEntries => {
+            path.extension().and_then(|value| value.to_str()) == Some("desktop")
+        }
+        CatalogFormat::WindowsShortcuts => is_windows_shortcut_path(path),
+    }
+}
+
+fn is_windows_shortcut_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            ["lnk", "url", "appref-ms"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
+fn fingerprint_roots(roots: &[PathBuf], format: CatalogFormat) -> Vec<EntryStamp> {
+    let max_depth = match format {
+        CatalogFormat::DesktopEntries => 3,
+        CatalogFormat::WindowsShortcuts => 8,
+    };
+    let mut stamps = Vec::new();
+
+    for (root_index, root) in roots.iter().enumerate() {
+        if !root.is_dir() {
+            stamps.push(EntryStamp::missing(root_index, root.clone()));
+            continue;
+        }
+
+        let mut root_stamps = Vec::new();
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .max_depth(max_depth)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let file_type = entry.file_type();
+            let path = entry.path();
+            if !file_type.is_dir()
+                && !(file_type.is_file() && is_supported_entry_path(path, format))
+            {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            root_stamps.push(EntryStamp::from_metadata(
+                root_index,
+                path.to_path_buf(),
+                file_type.is_dir(),
+                &metadata,
+            ));
+        }
+        root_stamps.sort_by(|left, right| left.path.cmp(&right.path));
+        stamps.extend(root_stamps);
+    }
+
+    stamps
 }
 
 fn load_applications_from_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<AppItem> {
@@ -159,15 +403,7 @@ fn load_windows_applications(roots: impl IntoIterator<Item = PathBuf>) -> Vec<Ap
                 continue;
             }
             let path = entry.path();
-            let supported = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|extension| {
-                    ["lnk", "url", "appref-ms"]
-                        .iter()
-                        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-                });
-            if !supported {
+            if !is_windows_shortcut_path(path) {
                 continue;
             }
             let Some(name) = path
@@ -420,6 +656,85 @@ mod tests {
         assert_eq!(apps[0].name, "Visual Studio Code");
         assert!(apps[0].keywords.iter().any(|value| value == "Development"));
         assert_eq!(apps[0].id, "Development-Visual Studio Code.lnk");
+        let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn catalog_reloads_when_desktop_entries_are_installed_updated_or_removed() {
+        let test_root = std::env::temp_dir().join(format!(
+            "alter-desktop-refresh-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let user_root = test_root.join("user-applications");
+        let system_root = test_root.join("system-applications");
+        // Leave `user_root` initially absent to verify that creating `~/.local/share/applications`
+        // after the daemon starts is detected too.
+        fs::create_dir_all(&system_root).unwrap();
+
+        let catalog = AppCatalog::from_desktop_roots([user_root.clone(), system_root.clone()]);
+        assert!(catalog.snapshot().is_empty());
+
+        let t3_path = system_root.join("t3code.desktop");
+        fs::write(
+            &t3_path,
+            "[Desktop Entry]\nType=Application\nName=T3 Code\nExec=t3code %U\n",
+        )
+        .unwrap();
+        catalog.schedule_check();
+        let after_install = catalog.snapshot();
+        assert_eq!(after_install.len(), 1);
+        assert_eq!(after_install[0].name, "T3 Code");
+
+        // Unchanged directories reuse the exact same Arc allocation.
+        catalog.schedule_check();
+        let unchanged = catalog.snapshot();
+        assert!(Arc::ptr_eq(&after_install, &unchanged));
+
+        // Creating the previously missing user directory overrides the system entry.
+        fs::create_dir_all(&user_root).unwrap();
+        fs::write(
+            user_root.join("t3code.desktop"),
+            "[Desktop Entry]\nType=Application\nName=T3 Code Custom\nExec=t3code\n",
+        )
+        .unwrap();
+        catalog.schedule_check();
+        let after_override = catalog.snapshot();
+        assert_eq!(after_override.len(), 1);
+        assert_eq!(after_override[0].name, "T3 Code Custom");
+
+        fs::remove_file(user_root.join("t3code.desktop")).unwrap();
+        fs::remove_file(&t3_path).unwrap();
+        catalog.schedule_check();
+        assert!(catalog.snapshot().is_empty());
+
+        let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn windows_catalog_reloads_when_shortcuts_change() {
+        let test_root = std::env::temp_dir().join(format!(
+            "alter-windows-refresh-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&test_root).unwrap();
+
+        let catalog = AppCatalog::from_windows_roots([test_root.clone()]);
+        assert!(catalog.snapshot().is_empty());
+
+        fs::write(test_root.join("T3 Code.lnk"), []).unwrap();
+        catalog.schedule_check();
+        let apps = catalog.snapshot();
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name, "T3 Code");
+
         let _ = fs::remove_dir_all(test_root);
     }
 }
